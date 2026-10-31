@@ -1,0 +1,1 @@
+PASS: diagnostics, FIX3 decoder equivalence, tone discrimination, peak hold, ADC failure cleanup, bounded scheduling, timeout/error counters, HDLC/FCS. Synthetic waveform frames FIX3=1 FIX5=1

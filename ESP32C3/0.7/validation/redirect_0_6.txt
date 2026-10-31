@@ -1,0 +1,1 @@
+PASS: UTF-8 shared response, 60-second GET meta refresh, manual root link; save/reboot/factory use helper; scheduling remains 1200 ms. Browser/hardware not exercised.

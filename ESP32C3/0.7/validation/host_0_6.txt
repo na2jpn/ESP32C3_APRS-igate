@@ -1,0 +1,11 @@
+bash canonical/APRS_iGate_C3_Rev0_6/tests/run_host.sh
+PASS: diagnostics, FIX3 decoder equivalence, tone discrimination, peak hold, ADC failure cleanup, bounded scheduling, timeout/error counters, HDLC/FCS. Synthetic waveform frames FIX3=1 FIX5=1
+
+python3 canonical/APRS_iGate_C3_Rev0_6/tests/test_led_cycle.py
+PASS: actual LED function/config; 4 complete cycles, all boundaries, disconnected/unverified indicators, RX blanking.
+
+python3 canonical/APRS_iGate_C3_Rev0_6/tests/test_v04.py
+PASS: position formatting/ranges/rollover/retry/rate, OTA auth/token/slot/size/truncation/abort/timeout/write/verification/success.
+
+python3 canonical/APRS_iGate_C3_Rev0_6/tests/test_lcd_cycle.py
+PASS: actual LCD service, 15-minute cadence, 2 cycles of 3x4-second pages, manual/AP priority, millis rollover, absent display.

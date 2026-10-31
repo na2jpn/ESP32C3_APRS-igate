@@ -1,0 +1,4 @@
+PASS: diagnostics, FIX3 decoder equivalence, tone discrimination, peak hold, ADC failure cleanup, bounded scheduling, timeout/error counters, HDLC/FCS. Synthetic waveform frames FIX3=1 FIX5=1
+PASS: actual LED function/config; 4 complete cycles, all boundaries, disconnected/unverified indicators, RX blanking.
+PASS: actual LCD service, 15-minute cadence, 2 cycles of 3x4-second pages, manual/AP priority, millis rollover, absent display.
+PASS: 4KB log eviction/escape/auth/clear; OTA token/session/size/order/duplicates/hex/binary integrity/cancel/timeout/rollover/write/verify/deferred reboot/RTC; position/TCP regressions.

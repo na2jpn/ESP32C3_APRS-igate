@@ -1,0 +1,6 @@
+v0.3 canonical / 2026-10-27 JST
+Host LED function compile/test: PASS
+Decoder/capture regression: PASS
+ESP32 target compile: NOT RUN (toolchain unavailable in current workspace)
+Prior version compile reports are historical and do not validate v0.3 target build.
+Hardware: existing Rev0.1 PCB unchanged.

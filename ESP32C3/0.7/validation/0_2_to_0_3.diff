@@ -1,0 +1,59 @@
+--- APRS_iGate_C3_Rev0_2.ino
++++ APRS_iGate_C3_Rev0_3.ino
+@@ -236,7 +236,7 @@
+   page.reserve(7000);
+   page += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+   page += F("<title>APRS iGate</title><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 14px;color:#222}h1{font-size:1.5rem}fieldset{margin:14px 0;padding:14px;border:1px solid #ccc;border-radius:8px}label{display:block;margin:9px 0}input{width:100%;box-sizing:border-box;padding:8px;font-size:16px}button{padding:10px 14px;margin:5px 5px 5px 0}.badge{display:inline-block;padding:3px 8px;border-radius:999px;margin:2px}.ok{background:#d9f5df}.ng{background:#f7d9d9}.mono{font-family:monospace;word-break:break-all}.small{font-size:.9rem;color:#555}</style></head><body>");
+-  page += F("<h1>APRS iGate ESP32C3 Rev0.2</h1>");
++  page += F("<h1>APRS iGate ESP32C3 Rev0.3</h1>");
+   page += statusBadge(String("Wi-Fi ") + (wifiOk ? "OK" : "NG"), wifiOk);
+   page += statusBadge(String("DRA818V ") + (draReady ? "OK" : "NG"), draReady);
+   page += statusBadge(String("ADC ") + (adcReady ? "OK" : "NG"), adcReady);
+@@ -426,13 +426,18 @@
+ 
+ static void serviceLeds() {
+   const uint32_t now = millis();
+-  if (WiFi.status() == WL_CONNECTED) digitalWrite(PIN_LED_WIFI, HIGH);
++  // Shared non-blocking cycle: Wi-Fi [0,10), APRS [10,20), both off [20,30).
++  const uint32_t phase = now % LED_STATUS_PERIOD_MS;
++  if (WiFi.status() == WL_CONNECTED)
++    digitalWrite(PIN_LED_WIFI, phase < LED_STATUS_ON_MS ? HIGH : LOW);
+   else digitalWrite(PIN_LED_WIFI, ((now / 400) & 1) ? HIGH : LOW);
+ 
+   if (now < aprsLedPulseUntil) {
+     digitalWrite(PIN_LED_APRS, LOW); // visible blink-off when normally connected
+   } else if (aprs.verified()) {
+-    digitalWrite(PIN_LED_APRS, HIGH);
++    const bool on = phase >= LED_APRS_OFFSET_MS &&
++                    phase < LED_APRS_OFFSET_MS + LED_STATUS_ON_MS;
++    digitalWrite(PIN_LED_APRS, on ? HIGH : LOW);
+   } else {
+     digitalWrite(PIN_LED_APRS, ((now / 700) & 1) ? HIGH : LOW);
+   }
+@@ -467,7 +472,7 @@
+   }
+ 
+   if (lcdPage == 0) {
+-    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 0.2";
++    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 0.3";
+     String l2 = String("W:") + (WiFi.status() == WL_CONNECTED ? "OK" : "--") + " IS:" + (aprs.verified() ? "OK" : "--");
+     lcd.printLine(0, l1);
+     lcd.printLine(1, l2);
+@@ -518,7 +523,7 @@
+ void setup() {
+   DBG_BEGIN();
+   delay(100);
+-  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.2");
++  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.3");
+   DBG_PRINTF("[BOOT] IDF=%s tick_hz=%u setup_priority=%u heap=%u\n",
+     ESP.getSdkVersion(), (unsigned)configTICK_RATE_HZ,
+     (unsigned)uxTaskPriorityGet(nullptr), ESP.getFreeHeap());
+@@ -539,7 +544,7 @@
+   DBG_PRINTF("[BOOT] LCD result=%d\n", lcdPresent);
+   if (lcdPresent) {
+     lcd.setBacklight(true);
+-    lcd.printLine(0, "APRS iGate 0.2");
++    lcd.printLine(0, "APRS iGate 0.3");
+     lcd.printLine(1, "Booting...");
+     lcdOnUntil = millis() + LCD_ON_MS;
+   }
