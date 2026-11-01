@@ -1,5 +1,7 @@
 # ESP32C3 APRS iGate
 
+2026-11-01:ADC関係に不具合がみつかりました。再修正中です。
+
 **XIAO ESP32C3とDRA818Vを使用した、144.640 MHz・受信専用のAPRS iGateです。**
 
 無線で受信したBell 202 AFSK 1200 bpsのパケットをESP32C3で復調し、Wi-Fi経由でAPRS-ISへ転送します。通常運用にPCは必要ありません。1602 LCDとWeb画面で接続・受信状況を確認できます。
