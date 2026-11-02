@@ -1,86 +1,54 @@
-# ESP32C3 APRS iGate
+# APRS iGate ESP32C3 v1.2
 
-2026-11-01:ADC関係に不具合がみつかりました。再修正中です。
+秋葉原技研 / PS Ham-ware。XIAO ESP32C3 + DRA818Vによる受信専用APRS iGate。
+**8周波数プリセット / 初期値144.660MHz / Bell 202 AFSK 1200bps / AX.25 / APRS-IS qAO**。
+管理画面は日本語・英語に対応し、日本語が初期表示です。
 
-**XIAO ESP32C3とDRA818Vを使用した、144.640 MHz・受信専用のAPRS iGateです。**
+## 初期設定・操作説明
 
-無線で受信したBell 202 AFSK 1200 bpsのパケットをESP32C3で復調し、Wi-Fi経由でAPRS-ISへ転送します。通常運用にPCは必要ありません。1602 LCDとWeb画面で接続・受信状況を確認できます。
+[初期設定・運用ガイドPDF（日本語）](Initial_Setup_Guide_PDF/APRS_iGate_C3_v1_2_Initial_Setup_Guide_JA.pdf)を参照してください。
+詳しい診断仕様・OTA途中再開の条件は[ファームREADME（日本語）](ESP32C3/APRS_iGate_C3_Rev1_2/README_JA.md)、
+海外向けの概要は[English guide](ESP32C3/APRS_iGate_C3_Rev1_2/README_EN.md)にあります。
 
-秋葉原技研 / PS Ham-ware - JH1HST
+## v1.2の変更
 
-![ESP32C3 APRS iGate](APRS_igate_esp32c3.png)
+管理画面の「受信周波数」で次の8種類を選択できます。
+「保存して再起動」でNVSへ保存し、再起動後のDRA818V、Web、LCD、起動ログへ反映します。
+未設定時は144.660MHz。v1.1で保存済みの144.640/144.660MHzや他の設定は引き継ぎます。
 
-## はじめに
+| MHz | 表示 / Region |
+| --- | --- |
+| 144.640 | — |
+| 144.660 | JA・初期値 / default |
+| 144.390 | US |
+| 144.800 | EU |
+| 145.175 | AU |
+| 144.575 | NZ |
+| 144.930 | AR |
+| 145.570 | BR |
 
-**書き込み・初期設定・運用方法は、[初期設定・運用ガイド（PDFフォルダー）](Initial_Setup_Guide_PDF/)を参照してください。** 使用するファームウェアに対応した版のPDFを開いてください。
+**全プリセットで1200bps AFSKです。** 地域表示は代表例です。日本の144.640MHzは一般に9600bps用ですが、
+本機は9600bps復調に対応しません。UART制御の9600bpsとは別です。受信感度・AFゲインの変更はありません。
 
-ファームウェアの`.ino`と`.h`、同梱のOTA用バイナリは、[ESP32C3フォルダー](ESP32C3/)内にあります。現行版は**v0.6**です。基板に印字されたRev.1とは別の版番号です。
+各ページ上部の「日本語 / English」で、設定、音声入力モニター、受信変化の記録、本体ログ、OTA画面を切り替えます。
+言語はURLの `?lang=en` / `?lang=ja` で指定し、ページ間の移動・フォーム・再起動後の戻り先に引き継ぎます。
+言語指定のないアクセスは日本語。設定保存や再起動は不要です。生ログ、CSV列名、APIキーやユーザー入力は翻訳しません。
+編集中の未保存入力は言語切り替え時に保持しないので、先に保存してください。OTA実行中の言語切り替えは抑止します。
 
-## リポジトリの構成
+## フォルダー構成
 
 | 場所 | 内容 |
 | --- | --- |
-| [ESP32C3/](ESP32C3/) | ファームウェアのソースコード（`.ino`・`.h`）、版ごとの説明・検証記録など |
-| [Initial_Setup_Guide_PDF/](Initial_Setup_Guide_PDF/) | 初期設定・運用ガイド。書き込み、Web設定、位置ビーコン、OTA、表示、トラブル対応 |
-| [APRS_igate_esp32c3.png](APRS_igate_esp32c3.png) | 本機の紹介画像 |
-| [diagram.pdf](diagram.pdf) | 回路資料 |
-| [LICENSE.md](LICENSE.md) | 利用条件 |
+| ESP32C3/APRS_iGate_C3_Rev1_2/ | Arduinoスケッチ、全ヘッダー、日英README、テスト、更新履歴 |
+| ESP32C3/APRS_iGate_C3_Rev1_2/firmware/ | OTA用アプリ単体.bin |
+| Initial_Setup_Guide_PDF/ | 初期設定・運用ガイドv1.2 |
+| LICENSE.md | ライセンス |
 
-## 主な機能
+既存v0.9以降からはOTAで `firmware/APRS_iGate_C3_v1.2_OTA.bin` を指定します。
+ZIPはアップロードしません。保存済みWi-Fi・コールサイン・ビーコン・OTA設定を引き継ぎます。
+更新後はRev1.2、選択したRF周波数、1200bps、APRS-IS VERIFIED、Samples増加を確認してください。
 
-- **144.640 MHz固定受信**：DRA818Vを起動時に自動設定。
-- **Bell 202 AFSK 1200 bps復調・AX.25解析**：ADC連続DMA、NRZI、HDLC、ビットスタッフィング除去、CRC検証。
-- **APRS-IS転送**：VERIFIED認証後、受信パケットを`qAO`付きで転送。同一パケットの30秒以内の再転送を抑制。
-- **自局位置ビーコン**：Webで緯度・経度を設定し、有効にすると認証後初回・以後30分間隔でAPRS-ISへ送信。Commentを付加。
-- **Web OTA更新**：専用パスワードで認証し、Wi-Fi経由でアプリケーションの`.bin`を更新。
-- **受信診断**：AF RMS、約5秒ピーク、ADC Min/Max、1200 / 2200 Hz検出値、CRC bad、DMA overflowなど。
-- **LCD・LED表示**：LCDは15分ごとに約24秒（3画面×4秒×2周）自動点灯。ボタン短押しでは60秒点灯。
-- **設定保持・自動復旧**：NVSへ設定保存。Wi-Fi / APRS-IS再接続と、長時間通信不能時の再初期化・再起動。
+v0.12実機では試験用パケットの受信・復調・APRS-IS転送・aprs.fi位置表示まで確認済み。
+v1.2はESP32C3ビルドとホストテストを実施。新しい周波数選択・各地域での実RF受信・長時間安定性は実機で確認してください。
 
-**RF送信、デジピーター、INET→RF転送は行いません。** 自局位置ビーコンもインターネット経由の送信です。DRA818VのPTTはハードウェアで受信状態に固定します。
-
-## ハードウェア・開発環境
-
-| 項目 | 構成・確認環境 |
-| --- | --- |
-| MCU | Seeed Studio XIAO ESP32C3 |
-| RF | DRA818V / 144.640 MHz / Bell 202 AFSK 1200 bps |
-| LCD | 1602A + PCF8574 I²Cバックパック、3.3 V / 5 Vレベル変換 |
-| ネットワーク | 2.4 GHz Wi-Fi |
-| 電源 | USB 5 V、DRA818V用約4.0 V |
-| 開発環境 | Arduino IDE 2.3.10 / ESP32 Core 3.3.12 |
-| 書き込み設定 | XIAO_ESP32C3、Flash 4MB、USB CDC On Boot：Enabled |
-| パーティション | Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)、OTA対応 |
-
-ESP32コアに含まれるライブラリを使用します。追加の外部Arduinoライブラリは不要です。
-
-## 導入時の要点
-
-1. [PDFガイド](Initial_Setup_Guide_PDF/)を確認し、[ESP32C3/](ESP32C3/)内の使用版の`.ino`をArduino IDEで開きます。同じフォルダーの`.h`も揃えてください。
-2. v0.2 / v0.3からの導入はUSBで書き込みます。v0.4以降でOTA設定済みならWeb更新できます。
-3. 初回設定APは`APRS-iGate-XXXX`、パスワードは`aprssetup`、設定URLは`http://192.168.4.1/`です。
-4. 通常時は同じLAN内から`http://aprs-igate.local/`、または本機のIPアドレスでWeb画面を開きます。
-
-位置表示には、**緯度・経度の入力と「Send own position to APRS-IS」のチェック**が必要です。Gridは保存のみで、ビーコンの座標には使用しません。Commentは**半角英数字・記号で40文字以内**にしてください（保存上限40バイト）。
-
-OTAパスワード設定後は、設定保存・Web再起動・初期化にもBasic認証を使用します。ユーザー名は**`admin`**、パスワードは設定した**OTA password**です。
-
-v0.6では、設定保存・Web再起動・初期化後に待機案内を表示し、**60秒後にトップ画面へ自動で戻ります**。IPが変わった場合は、新しいアドレスで開き直してください。
-
-詳しい手順、SETUPボタン、LED点灯周期、OTA用ファイルの選び方、USB復旧方法は[PDFガイド](Initial_Setup_Guide_PDF/)にまとめています。
-
-## 開発・検証状況
-
-実機ではFIX5の段階で、IC-7100のFM試験電波によるAFSK復調・AX.25解析、重複除外、APRS-IS認証とTCP書き込みまで確認しました。現在は設置場所での受信・連続運転を評価しています。
-
-v0.6はESP32 Core 3.3.12 / XIAO ESP32C3向けコンパイルと、PC上での復調・ADC診断・LED・位置ビーコン・OTA・LCD制御テストを実施済みです。保存後の60秒遷移はソースを確認しています。新機能の実機動作・ブラウザーでの遷移、サーバーでの受理・aprs.fi表示は別途確認する項目です。版ごとの詳細は、ソースに同梱した`CHANGELOG.md`と`TEST_NOTES.md`を参照してください。
-
-`Gated`と`Position beacon TCP writes`はTCP書き込み成功件数で、サーバー受理や地図表示を保証する値ではありません。CRC badは雑音でも増えます。受信診断枠以外の表示は、最新状況を確認する際にページを開き直してください。
-
-## ライセンス・関連リンク
-
-利用条件は[PS Ham-ware / AKIHABARA-GIKEN License](LICENSE.md)に従います。個人の学習・研究・アマチュア無線用途での製作・実行・改変が許可されています。営利利用、元データの再配布、改変物の公開・配布には事前の許可が必要です。詳細はライセンス本文を確認してください。
-
-- [PS Ham-ware](https://2jp.org/ps/)
-- [秋葉原技研](https://2jp.org/js1yjy/)
-- [不具合報告・改善提案](https://github.com/na2jpn/ESP32C3_APRS-igate/issues)
+[GitHub](https://github.com/na2jpn/ESP32C3_APRS-igate) / [プロジェクトページ](https://2jp.org/js1yjy/esp32_aprs_igate/)
