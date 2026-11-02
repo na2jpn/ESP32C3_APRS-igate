@@ -1,0 +1,1 @@
+PASS: actual LCD service, 15-minute cadence, 2 cycles of 3x4-second pages, manual/AP priority, millis rollover, absent display.

@@ -1,0 +1,14 @@
+Downloading missing tool builtin:dfu-discovery@0.1.2...
+builtin:dfu-discovery@0.1.2 Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/dfu-discovery/dfu-discovery_v0.1.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:dfu-discovery@0.1.2 tool: Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/dfu-discovery/dfu-discovery_v0.1.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:mdns-discovery@1.1.0...
+builtin:mdns-discovery@1.1.0 Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/mdns-discovery/mdns-discovery_v1.1.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:mdns-discovery@1.1.0 tool: Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/mdns-discovery/mdns-discovery_v1.1.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:serial-discovery@1.5.2...
+builtin:serial-discovery@1.5.2 Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/serial-discovery/serial-discovery_v1.5.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:serial-discovery@1.5.2 tool: Download failed: performing HEAD request: Head "https://downloads.arduino.cc/discovery/serial-discovery/serial-discovery_v1.5.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:serial-monitor@0.15.0...
+builtin:serial-monitor@0.15.0 Download failed: performing HEAD request: Head "https://downloads.arduino.cc/monitor/serial-monitor/serial-monitor_v0.15.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:serial-monitor@0.15.0 tool: Download failed: performing HEAD request: Head "https://downloads.arduino.cc/monitor/serial-monitor/serial-monitor_v0.15.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Sketch uses 1145107 bytes (87%) of program storage space. Maximum is 1310720 bytes.
+Global variables use 47740 bytes (14%) of dynamic memory, leaving 279940 bytes for local variables. Maximum is 327680 bytes.

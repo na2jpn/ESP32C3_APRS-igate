@@ -1,0 +1,1497 @@
+--- v1.1/APRS_iGate_C3_Rev1_1.ino
++++ v1.2/APRS_iGate_C3_Rev1_2.ino
+@@ -7,6 +7,7 @@
+ 
+ #include "config.h"
+ #include "settings.h"
++#include "ui_page.h"
+ #include "web_rf_settings.h"
+ #include "lcd1602_pcf8574.h"
+ #include "dra818v.h"
+@@ -90,6 +91,8 @@
+ 
+ static String htmlEscape(String s) {
+   s.replace("&", "&amp;");
++  s.replace("{", "&#123;");
++  s.replace("}", "&#125;");
+   s.replace("<", "&lt;");
+   s.replace(">", "&gt;");
+   s.replace("\"", "&quot;");
+@@ -142,9 +145,9 @@
+ 
+ static String rebootResponse(const String &message) {
+   String page = F("<!doctype html><html lang='ja'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='60;url=/'><title>APRS iGate - Rebooting</title></head><body>");
+-  page += F("<h1>再起動中です</h1><p>");
++  page += F("<h1>{{reboot.title}}</h1><p>");
+   page += htmlEscape(message);
+-  page += F("</p><p>60秒後にトップ画面へ自動で戻ります。</p><p><a href='/'>トップ画面を開く</a></p><p>本機のIPアドレスが変わった場合は、新しいアドレスで開いてください。</p></body></html>");
++  page += F("</p><p>{{reboot.wait}}</p><p><a href='/'>{{reboot.home}}</a></p><p>{{reboot.ip}}</p></body></html>");
+   return page;
+ }
+ 
+@@ -289,7 +292,7 @@
+   page.reserve(9000);
+   page += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+   page += F("<title>APRS iGate</title><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 14px;color:#222}h1{font-size:1.5rem}fieldset{margin:14px 0;padding:14px;border:1px solid #ccc;border-radius:8px}label{display:block;margin:9px 0}input{width:100%;box-sizing:border-box;padding:8px;font-size:16px}button{padding:10px 14px;margin:5px 5px 5px 0}.badge{display:inline-block;padding:3px 8px;border-radius:999px;margin:2px}.ok{background:#d9f5df}.ng{background:#f7d9d9}.mono{font-family:monospace;word-break:break-all}.small{font-size:.9rem;color:#555}</style></head><body>");
+-  page += F("<h1>APRS iGate ESP32C3 Rev1.1</h1>");
++  page += F("<h1>APRS iGate ESP32C3 Rev1.2</h1>");
+   page += statusBadge(String("Wi-Fi ") + (wifiOk ? "OK" : "NG"), wifiOk);
+   page += statusBadge(String("DRA818V ") + (draReady ? "OK" : "NG"), draReady);
+   page += F("<span id='adcstate'>");
+@@ -299,56 +302,56 @@
+   page += F("<p><b>RF:</b> ");
+   page += SettingsStore::rxFrequencyLabel(config);
+   page += F(" MHz / 1200 bps AFSK / RX only / qAO</p>");
+-  page += F("<p><b>IP:</b> ");
++  page += F("<p><b>{{main.ip}}</b> ");
+   page += wifiOk ? WiFi.localIP().toString() : String("-");
+-  page += F(" &nbsp; <b>mDNS:</b> aprs-igate.local &nbsp; <b>Uptime:</b> ");
++  page += F(" &nbsp; <b>mDNS:</b> aprs-igate.local &nbsp; <b>{{main.uptime}}</b> ");
+   page += uptimeText();
+   page += F("</p>");
+-  page += F("<p><b>Decoded:</b> "); page += rxPacketCount;
+-  page += F(" &nbsp; <b>Gated:</b> "); page += gatedPacketCount;
+-  page += F(" &nbsp; <b>Dup:</b> "); page += duplicateCount;
+-  page += F(" &nbsp; <b>Blocked:</b> "); page += blockedCount;
+-  page += F(" &nbsp; <b>CRC bad:</b> "); page += audio.monitor().crcBad;
+-  page += F(" &nbsp; <b>AF RMS:</b> "); page += String(audio.monitor().rms, 5);
+-  page += F("</p><fieldset><legend>AFSK receive monitor (auto-update 1 s)</legend>");
+-  page += F("<div class='mono' id='afdiag'>Loading monitor...</div>");
+-  page += F("<p class='small'>ADC Min/Max are raw codes in the last 250 ms window. Mark/Space are detector magnitudes, not calibrated dB. Peak holds the maximum RMS over approximately 5 s.</p></fieldset>");
+-  page += F("<script>async function refreshAF(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json();const clock=document.getElementById('clockstatus');if(clock)clock.textContent=s.clock;const badge=document.getElementById('adcstate');if(badge){badge.className='badge '+(s.adc?'ok':'ng');badge.textContent='ADC '+s.adc_state;}const f=x=>Number(x||0).toFixed(5);document.getElementById('afdiag').textContent='AF RMS: '+f(s.af_rms)+' | Peak 5s: '+f(s.af_peak5s)+' | ADC Min/Max: '+s.adc_min+'/'+s.adc_max+' | 1200Hz: '+f(s.mark1200)+' | 2200Hz: '+f(s.space2200)+' | CRC bad: '+s.crc_bad+' | Decoded: '+s.decoded+' | Samples: '+s.samples+' | DMA overflow: '+s.adc_overflows+' | Read errors: '+s.adc_read_errors+' | Timeouts: '+s.adc_timeouts+' | Capture samples: '+s.captured_samples+' | Data age: '+s.adc_age_ms+' ms | Capture rate: '+s.capture_rate+' Sa/s | Recovery attempts/success: '+s.recovery_attempts+'/'+s.recoveries+' | Discarded: '+s.discarded_samples+' | Stack free: '+s.adc_stack_free_bytes+' B | Max block: '+s.adc_max_block_us+' us';}catch(e){document.getElementById('afdiag').textContent='Monitor unavailable: '+e.message;}}refreshAF();setInterval(refreshAF,1000);</script>");
+-  page += F("<p class='mono'><b>Last RX:</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
++  page += F("<p><b>{{main.decoded}}</b> "); page += rxPacketCount;
++  page += F(" &nbsp; <b>{{main.gated}}</b> "); page += gatedPacketCount;
++  page += F(" &nbsp; <b>{{main.dup}}</b> "); page += duplicateCount;
++  page += F(" &nbsp; <b>{{main.blocked}}</b> "); page += blockedCount;
++  page += F(" &nbsp; <b>{{main.crc}}</b> "); page += audio.monitor().crcBad;
++  page += F(" &nbsp; <b>{{main.rms}}</b> "); page += String(audio.monitor().rms, 5);
++  page += F("</p><fieldset><legend>{{main.monitor}}</legend>");
++  page += F("<div class='mono' id='afdiag'>{{main.loading}}</div>");
++  page += F("<p class='small'>{{main.hint}}</p></fieldset>");
++  page += F("<script>async function refreshAF(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json();const clock=document.getElementById('clockstatus');if(clock)clock.textContent=s.clock;const badge=document.getElementById('adcstate');if(badge){badge.className='badge '+(s.adc?'ok':'ng');badge.textContent='ADC '+s.adc_state;}const f=x=>Number(x||0).toFixed(5);document.getElementById('afdiag').textContent='AF RMS: '+f(s.af_rms)+' | Peak 5s: '+f(s.af_peak5s)+' | ADC Min/Max: '+s.adc_min+'/'+s.adc_max+' | 1200Hz: '+f(s.mark1200)+' | 2200Hz: '+f(s.space2200)+' | CRC bad: '+s.crc_bad+'{{live.decoded}}'+s.decoded+'{{live.samples}}'+s.samples+' | DMA overflow: '+s.adc_overflows+'{{live.errors}}'+s.adc_read_errors+'{{live.timeout}}'+s.adc_timeouts+' | Capture samples: '+s.captured_samples+'{{live.age}}'+s.adc_age_ms+' ms{{live.rate}}'+s.capture_rate+' Sa/s{{live.recovery}}'+s.recovery_attempts+'/'+s.recoveries+'{{live.discarded}}'+s.discarded_samples+'{{live.stack}}'+s.adc_stack_free_bytes+' B{{live.block}}'+s.adc_max_block_us+' us';}catch(e){document.getElementById('afdiag').textContent='{{live.unavailable}}'+e.message;}}refreshAF();setInterval(refreshAF,1000);</script>");
++  page += F("<p class='mono'><b>{{main.last}}</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
+ 
+   page += F("<form method='post' action='/save'><fieldset><legend>Wi-Fi / APRS-IS</legend>");
+   page += makeRfFrequencySelect(config);
+-  page += F("<label>Wi-Fi SSID<input name='ssid' value='"); page += htmlEscape(config.wifiSsid); page += F("'></label>");
+-  page += F("<label>Wi-Fi Password<input type='password' name='wpass' placeholder='blank = keep current'></label>");
+-  page += F("<label>iGate Callsign-SSID<input name='call' maxlength='9' value='"); page += htmlEscape(config.callsign); page += F("'></label>");
+-  page += F("<label>APRS-IS Passcode<input name='apass' value='"); page += htmlEscape(config.aprsPasscode); page += F("'></label>");
+-  page += F("<label>APRS-IS Server<input name='server' value='"); page += htmlEscape(config.aprsServer); page += F("'></label>");
+-  page += F("<label>Port<input name='port' type='number' min='1' max='65535' value='"); page += config.aprsPort; page += F("'></label>");
+-  page += F("<label>Grid (saved for future use)<input name='grid' maxlength='8' value='"); page += htmlEscape(config.grid); page += F("'></label>");
+-  page += F("<label>Comment<input name='comment' maxlength='40' value='"); page += htmlEscape(config.comment); page += F("'></label>");
++  page += F("<label>{{field.ssid}}<input name='ssid' value='"); page += htmlEscape(config.wifiSsid); page += F("'></label>");
++  page += F("<label>{{field.wpass}}<input type='password' name='wpass' placeholder='{{field.keep}}'></label>");
++  page += F("<label>{{field.call}}<input name='call' maxlength='9' value='"); page += htmlEscape(config.callsign); page += F("'></label>");
++  page += F("<label>{{field.apass}}<input name='apass' value='"); page += htmlEscape(config.aprsPasscode); page += F("'></label>");
++  page += F("<label>{{field.server}}<input name='server' value='"); page += htmlEscape(config.aprsServer); page += F("'></label>");
++  page += F("<label>{{field.port}}<input name='port' type='number' min='1' max='65535' value='"); page += config.aprsPort; page += F("'></label>");
++  page += F("<label>{{field.grid}}<input name='grid' maxlength='8' value='"); page += htmlEscape(config.grid); page += F("'></label>");
++  page += F("<label>{{field.comment}}<input name='comment' maxlength='40' value='"); page += htmlEscape(config.comment); page += F("'></label>");
+   page += F("<label><input style='width:auto' type='checkbox' name='beacon' value='1'");
+   if (config.beaconEnabled) page += F(" checked");
+-  page += F("> Send own position to APRS-IS (every 30 minutes)</label>");
+-  page += F("<label>Latitude (decimal degrees, south negative)<input name='lat' value='"); page += htmlEscape(config.latitude); page += F("'></label>");
+-  page += F("<label>Longitude (decimal degrees, west negative)<input name='lon' value='"); page += htmlEscape(config.longitude); page += F("'></label>");
+-  page += F("<label>OTA password (8-63 characters; blank = keep current)<input type='password' name='otapass' maxlength='63' autocomplete='new-password'></label>");
+-  page += F("<button type='submit'>Save & Reboot</button></fieldset></form>");
+-
+-  page += F("<p><b>Clock:</b> <span id='clockstatus'>"); page += clockStatus(); page += F("</span></p><p><a href='/rxdiag'>受信変化の記録 / RX diagnostics</a> (RAM / 4 events)</p>");
+-  page += F("<p><a href='/audio'>音声入力モニター / 波形・レベル</a></p>");
+-  page += F("<p><a href='/logs'>本体ログ / Device log</a></p>");
+-  page += F("<p><a href='/update'>Wi-Fi firmware update (OTA)</a> — user: admin</p>");
+-  page += F("<form method='post' action='/adc/recover'><input type='hidden' name='token' value='");page += otaToken;page += F("'><button>ADC取り込みを復旧</button></form>");
+-  page += F("<p><b>Position beacon TCP writes:</b> "); page += beaconSentCount; page += F("</p>");
+-  page += F("<fieldset><legend>Maintenance</legend><form method='post' action='/reboot' style='display:inline'><button>Reboot</button></form>");
+-  page += F("<form method='post' action='/factory' style='display:inline' onsubmit=\"return confirm('Erase settings?')\"><button>Factory reset</button></form></fieldset>");
+-  page += F("<p class='small'>SETUP button: short press = LCD backlight 60 s / auto: 24 s every 15 min / 5 s = setup AP / 15 s = factory reset. Setup AP password: <b>aprssetup</b>.</p>");
++  page += F("> {{field.beacon}}</label>");
++  page += F("<label>{{field.lat}}<input name='lat' value='"); page += htmlEscape(config.latitude); page += F("'></label>");
++  page += F("<label>{{field.lon}}<input name='lon' value='"); page += htmlEscape(config.longitude); page += F("'></label>");
++  page += F("<label>{{field.otapass}}<input type='password' name='otapass' maxlength='63' autocomplete='new-password'></label>");
++  page += F("<button type='submit'>{{button.save}}</button></fieldset></form>");
++
++  page += F("<p><b>{{main.clock}}</b> <span id='clockstatus'>"); page += clockStatus(); page += F("</span></p><p><a href='/rxdiag'>{{link.rx}}</a> (RAM / 4 events)</p>");
++  page += F("<p><a href='/audio'>{{link.audio}}</a></p>");
++  page += F("<p><a href='/logs'>{{link.logs}}</a></p>");
++  page += F("<p><a href='/update'>{{link.ota}}</a> {{main.admin}}</p>");
++  page += F("<form method='post' action='/adc/recover'><input type='hidden' name='token' value='");page += otaToken;page += F("'><button>{{button.adc}}</button></form>");
++  page += F("<p><b>{{main.beacons}}</b> "); page += beaconSentCount; page += F("</p>");
++  page += F("<fieldset><legend>{{main.maintenance}}</legend><form method='post' action='/reboot' style='display:inline'><button>{{button.reboot}}</button></form>");
++  page += F("<form method='post' action='/factory' style='display:inline' onsubmit=\"return confirm('{{confirm.factory}}')\"><button>{{button.factory}}</button></form></fieldset>");
++  page += F("<p class='small'>{{main.buttonhint}} <b>aprssetup</b>.</p>");
+   page += F("</body></html>");
+   return page;
+ }
+ 
+ static void setupWebRoutes() {
+-  web.on("/", HTTP_GET, []() { web.send(200, "text/html; charset=utf-8", makePage()); });
++  web.on("/", HTTP_GET, []() { sendUiPage(web, makePage()); });
+ 
+   setupOtaRoutes(web, config, [](bool active) { audio.setMaintenance(active); });
+   setupLogRoutes(web, config);
+@@ -407,18 +410,18 @@
+     if(config.otaPassword.length()>=8&&!web.authenticate("admin",config.otaPassword.c_str())){web.requestAuthentication();return;}
+     if(web.arg("token")!=otaToken){web.send(403,"text/plain","Invalid token");return;}
+     if(otaBusy){web.send(409,"text/plain","OTA in progress");return;}
+-    if(!audio.requestRecovery()){web.send(503,"text/plain","ADC not initialized; Reboot required");return;}
+-    web.send(200,"text/plain; charset=utf-8","ADC recovery requested. Return to the main page and check actual sample progress and logs.");
++    if(!audio.requestRecovery()){web.send(503,"text/plain",uiText("error.adc", uiEnglish(web)));return;}
++    web.send(200,"text/plain; charset=utf-8",uiText("adc.requested", uiEnglish(web)));
+   });
+ 
+   web.on("/save", HTTP_POST, []() {
+-    if (otaBusy) { web.send(409,"text/plain","OTA in progress. Finish or cancel it first."); return; }
++    if (otaBusy) { web.send(409,"text/plain",uiText("error.busy", uiEnglish(web))); return; }
+     if (config.otaPassword.length() >= 8 && !web.authenticate("admin", config.otaPassword.c_str())) { web.requestAuthentication(); return; }
+     AppConfig next = config;
+     if (web.hasArg("rxfreq")) {
+       const String requestedFrequency = web.arg("rxfreq");
+       if (!SettingsStore::validRxFrequency(requestedFrequency)) {
+-        web.send(400, "text/plain; charset=utf-8", "受信周波数は144.640または144.660MHzを選択してください。"); return;
++        web.send(400, "text/plain; charset=utf-8", uiText("error.rf", uiEnglish(web))); return;
+       }
+       next.rxFrequency = requestedFrequency;
+     }
+@@ -436,38 +439,38 @@
+     next.longitude = web.arg("lon");
+     if (web.arg("otapass").length()) next.otaPassword = web.arg("otapass");
+     if (next.otaPassword.length() && (next.otaPassword.length() < 8 || next.otaPassword.length() > 63)) {
+-      web.send(400, "text/plain", "OTA password must be 8-63 characters."); return;
++      web.send(400, "text/plain", uiText("error.password", uiEnglish(web))); return;
+     }
+     double lat, lon;
+     if (next.beaconEnabled && !parsePosition(next.latitude, next.longitude, lat, lon)) {
+-      web.send(400, "text/plain", "Valid latitude and longitude required for position beacon."); return;
++      web.send(400, "text/plain", uiText("error.position", uiEnglish(web))); return;
+     }
+     SettingsStore::normalize(next);
+ 
+     if (next.wifiSsid.length() == 0 || !SettingsStore::validCallsign(next.callsign)) {
+-      web.send(400, "text/plain; charset=utf-8", "SSID or callsign is invalid.");
++      web.send(400, "text/plain; charset=utf-8", uiText("error.config", uiEnglish(web)));
+       return;
+     }
+     if (!settingsStore.save(next)) {
+-      web.send(500, "text/plain; charset=utf-8", "Failed to save settings.");
++      web.send(500, "text/plain; charset=utf-8", uiText("error.save", uiEnglish(web)));
+       return;
+     }
+-    web.send(200, "text/html; charset=utf-8", rebootResponse("設定を保存しました。Saved. Rebooting..."));
++    sendUiPage(web, rebootResponse(uiText("saved", uiEnglish(web))));
+     scheduleReboot();
+   });
+ 
+   web.on("/reboot", HTTP_POST, []() {
+-    if (otaBusy) { web.send(409,"text/plain","OTA in progress. Finish or cancel it first."); return; }
++    if (otaBusy) { web.send(409,"text/plain",uiText("error.busy", uiEnglish(web))); return; }
+     if (config.otaPassword.length() >= 8 && !web.authenticate("admin", config.otaPassword.c_str())) { web.requestAuthentication(); return; }
+-    web.send(200, "text/html; charset=utf-8", rebootResponse("Rebooting..."));
++    sendUiPage(web, rebootResponse(uiText("restarting", uiEnglish(web))));
+     scheduleReboot();
+   });
+ 
+   web.on("/factory", HTTP_POST, []() {
+-    if (otaBusy) { web.send(409,"text/plain","OTA in progress. Finish or cancel it first."); return; }
++    if (otaBusy) { web.send(409,"text/plain",uiText("error.busy", uiEnglish(web))); return; }
+     if (config.otaPassword.length() >= 8 && !web.authenticate("admin", config.otaPassword.c_str())) { web.requestAuthentication(); return; }
+     settingsStore.clear();
+-    web.send(200, "text/html; charset=utf-8", rebootResponse("設定を消去しました。Settings erased. Rebooting..."));
++    sendUiPage(web, rebootResponse(uiText("erased", uiEnglish(web))));
+     scheduleReboot();
+   });
+ 
+@@ -608,7 +611,7 @@
+   }
+ 
+   if (lcdPage == 0) {
+-    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 1.1";
++    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 1.2";
+     String l2 = String("W:") + (WiFi.status() == WL_CONNECTED ? "OK" : "--") + " IS:" + (aprs.verified() ? "OK" : "--");
+     lcd.printLine(0, l1);
+     lcd.printLine(1, l2);
+@@ -660,7 +663,7 @@
+   DBG_BEGIN();
+   delay(100);
+   logOtaBoot();
+-  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev1.1");
++  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev1.2");
+   DBG_PRINTF("[BOOT] IDF=%s tick_hz=%u setup_priority=%u heap=%u\n",
+     ESP.getSdkVersion(), (unsigned)configTICK_RATE_HZ,
+     (unsigned)uxTaskPriorityGet(nullptr), ESP.getFreeHeap());
+@@ -682,7 +685,7 @@
+   DBG_PRINTF("[BOOT] LCD result=%d\n", lcdPresent);
+   if (lcdPresent) {
+     lcd.setBacklight(true);
+-    lcd.printLine(0, "APRS iGate 1.1");
++    lcd.printLine(0, "APRS iGate 1.2");
+     lcd.printLine(1, "Booting...");
+     lcdOnUntil = millis() + LCD_ON_MS;
+   }
+--- v1.1/audio_scope_template.html
++++ v1.2/audio_scope_template.html
+@@ -1,10 +1,10 @@
+-<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>音声入力モニター v1.1</title><style>
++<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{scope.title}} v1.2</title><style>
+ body{font-family:system-ui,sans-serif;max-width:860px;margin:24px auto;padding:0 14px;color:#18232c;background:#f5f7f9}h1{font-size:1.5rem}.box{background:white;padding:18px;border:1px solid #d4dce3;border-radius:10px;margin:14px 0}button,select{font:inherit;padding:9px;margin:4px}canvas{width:100%;height:240px;background:#101d29;border-radius:6px}.track{height:28px;background:#e4eaf0;position:relative;overflow:hidden;border-radius:5px;margin:10px 0}.fill{height:100%;background:#20865c;width:0}.peak{position:absolute;top:0;bottom:0;border-left:3px solid #e12828;left:0}.ticks{display:flex;justify-content:space-between;font-size:.85rem;color:#52606c}#status{font-weight:600}#numbers{font-variant-numeric:tabular-nums;line-height:1.8;overflow-wrap:anywhere}.hint{color:#4a5966;font-size:.9rem}a{color:#135b9c}button:disabled{opacity:.5}
+-</style></head><body><h1>音声入力モニター v1.1</h1><p><a href="/">管理画面</a> / <a href="/rxdiag">受信変化の記録</a> / <a href="/logs">本体ログ</a></p>
+-<div class="box"><p>同じ周波数のFMで「あー → 無音 → あー」と数秒ずつ区切り、声に同期する変化を確認します。<b>電波のSメーターではなく、ESP32のADCに届いた音声の強さです。</b> FMは無信号時の雑音のほうが大きく、受信するとレベルが下がる場合もあります。</p>
+-<button id="freeze">一時停止・保持</button><label>表示倍率 <select id="gain"><option value="1">固定 ×1</option><option value="4">固定 ×4</option><option value="16">固定 ×16</option><option value="auto">自動拡大（DC除去）</option></select></label><p id="status" role="status">取得待ち...</p>
+-<div class="track" role="meter" aria-label="音声入力 AC RMS dBFS" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60" id="meter"><div id="level" class="fill"></div><div id="peak" class="peak"></div></div><div class="ticks"><span>−60</span><span>−45</span><span>−30</span><span>−15</span><span>0 dBFS</span></div><p class="hint">緑：直近200msのAC RMS ／ 赤線：本体で連続集計した直近約5秒の最大40ms AC RMS。2048 ADCコードを0 dBFSの基準とします。停止中は保持します。</p>
+-<p id="numbers">有効な測定を待っています。</p></div>
+-<div class="box"><canvas id="wave" width="800" height="240" aria-label="ADC入力波形"></canvas><p id="scale">表示範囲：ADC 0〜4095 ／ ×1 ／ 中心2048</p><p class="hint">1枚約40ms、4サンプルごとの最小・最大を縦線表示。横軸は0〜40ms、縦軸はADCコードです。自動拡大では倍率・中心を明示します。入力端付近は赤色で警告します。ADCコードから電圧への校正は行っていません。</p></div>
+-<p class="hint">約1秒間隔で表示を更新します。音量と赤いピーク線は、閲覧中は本体で全40ms区間を連続集計します。波形は最新40msの抜粋で、連続録音ではありません。表示中のみ波形計算を行い、非表示・停止後は約3秒で休止。通信が遅い場合は重ねて要求せず再試行します。ブラウザーの一時停止はこの画面の表示だけを保持し、APRS受信を止めません。</p>
++</style></head><body><h1>{{scope.title}} v1.2</h1><p><a href="/">{{scope.main}}</a> / <a href="/rxdiag">{{scope.rx}}</a> / <a href="/logs">{{scope.logs}}</a></p>
++<div class="box"><p>{{scope.intro}}</p>
++<button id="freeze">{{scope.freeze}}</button><label>{{scope.gain}} <select id="gain"><option value="1">{{scope.fixed}} ×1</option><option value="4">{{scope.fixed}} ×4</option><option value="16">{{scope.fixed}} ×16</option><option value="auto">{{scope.auto}}</option></select></label><p id="status" role="status">{{scope.waiting}}</p>
++<div class="track" role="meter" aria-label="{{scope.meterlabel}}" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60" id="meter"><div id="level" class="fill"></div><div id="peak" class="peak"></div></div><div class="ticks"><span>−60</span><span>−45</span><span>−30</span><span>−15</span><span>0 dBFS</span></div><p class="hint">{{scope.meterhint}}</p>
++<p id="numbers">{{scope.await}}</p></div>
++<div class="box"><canvas id="wave" width="800" height="240" aria-label="{{scope.canvas}}"></canvas><p id="scale">{{scope.range}}</p><p class="hint">{{scope.wavehint}}</p></div>
++<p class="hint">{{scope.bottom}}</p>
+ <script>
+--- v1.1/audio_scope_ui.js
++++ v1.2/audio_scope_ui.js
+@@ -17,19 +17,19 @@
+  const n=data.low.length;
+  for(let i=0;i<n;i++){const x=50+i*(w-60)/(n-1);ctx.beginPath();ctx.moveTo(x,y(data.high[i]));ctx.lineTo(x,Math.max(y(data.high[i])+1,y(data.low[i])));ctx.stroke();}
+  ctx.fillStyle='#afc2d1';ctx.fillText('0 ms',50,h-3);ctx.fillText(data.duration_ms.toFixed(1)+' ms',w-65,h-3);
+- el('scale').textContent='表示倍率 ×'+gain+(choice==='auto'?'（自動・DC除去）':'（固定）')+' ／ 中心ADC '+center.toFixed(1)+' ／ 1枚 '+data.duration_ms.toFixed(1)+' ms';
++ el('scale').textContent='{{scopejs.0}}'+gain+(choice==='auto'?'{{scopejs.1}}':'{{scopejs.2}}')+'{{scopejs.3}}'+center.toFixed(1)+'{{scopejs.4}}'+data.duration_ms.toFixed(1)+' ms';
+ }
+ function render(data,now){
+  const current=db(data.meter_rms),peak=db(data.meter_peak5s);
+  el('level').style.width=position(current)+'%';el('peak').style.left=position(peak)+'%';
+  el('meter').setAttribute('aria-valuenow',String(Math.max(-60,Number.isFinite(current)?current:-60)));
+- el('numbers').textContent='音量（200ms AC RMS） '+dbText(current)+' ('+(data.meter_rms/2048*100).toFixed(2)+'%) ／ 5秒ピーク '+dbText(peak)+' ／ 波形40ms RMS '+dbText(db(data.rms))+' ／ 波形ピーク '+dbText(db(data.peak))+' ／ ADC平均 '+data.mean.toFixed(1)+' ／ Min/Max '+data.minimum+'/'+data.maximum+' ／ 端付近 '+data.clipped+' / '+data.samples+' samples';
++ el('numbers').textContent='{{scopejs.5}}'+dbText(current)+' ('+(data.meter_rms/2048*100).toFixed(2)+'{{scopejs.6}}'+dbText(peak)+'{{scopejs.7}}'+dbText(db(data.rms))+'{{scopejs.8}}'+dbText(db(data.peak))+'{{scopejs.9}}'+data.mean.toFixed(1)+'{{scopejs.10}}'+data.minimum+'/'+data.maximum+'{{scopejs.11}}'+data.clipped+' / '+data.samples+' samples';
+  draw(data);
+ }
+ function blank(message){
+  last=null;el('status').textContent=message;
+  el('level').style.width='0%';el('peak').style.left='0%';el('meter').setAttribute('aria-valuenow','-60');
+- el('numbers').textContent='有効な測定なし。音量ゼロを意味しません。';
++ el('numbers').textContent='{{scopejs.12}}';
+  const c=el('wave'),ctx=c.getContext('2d');ctx.fillStyle='#101d29';ctx.fillRect(0,0,c.width,c.height);
+ }
+ function schedule(ms){clearTimeout(timer);if(!frozen&&!hidden)timer=setTimeout(poll,ms);}
+@@ -39,21 +39,21 @@
+  const timeout=setTimeout(()=>request.abort(),8000);
+  try{
+   const response=await fetch('/audio/data',{cache:'no-store',signal:request.signal});
+-  if(!response.ok)throw Error(response.status===409?'OTA中・音声モニター休止':'HTTP '+response.status);
++  if(!response.ok)throw Error(response.status===409?'{{scopejs.13}}':'HTTP '+response.status);
+   const data=await response.json();if(gen!==generation||frozen||hidden)return;
+   failures=0;
+-  if(!data.valid){blank('測定待ち / '+data.state+' ／ 古い波形は表示しません。');}
+-  else{last=data;render(data,Date.now());el('status').textContent='取得中 ／ 本体の記録時点 '+data.state+' ／ 取得時の波形経過 '+data.age_ms+' ms ／ 通信所要 '+(Date.now()-started)+' ms ／ 取得番号 '+data.sequence+(data.clipped?' ／ ADC端付近あり（入力レベル・バイアスを確認）':'');}
+- }catch(e){if(gen===generation&&!frozen&&!hidden){++failures;blank('通信待ち：'+e.message+' ／ 再試行します。');}}
++  if(!data.valid){blank('{{scopejs.14}}'+data.state+'{{scopejs.15}}');}
++  else{last=data;render(data,Date.now());el('status').textContent='{{scopejs.16}}'+data.state+'{{scopejs.17}}'+data.age_ms+'{{scopejs.18}}'+(Date.now()-started)+'{{scopejs.19}}'+data.sequence+(data.clipped?'{{scopejs.20}}':'');}
++ }catch(e){if(gen===generation&&!frozen&&!hidden){++failures;blank('{{scopejs.21}}'+e.message+'{{scopejs.22}}');}}
+  finally{clearTimeout(timeout);if(controller===request)controller=null;schedule(failures?Math.min(15000,1000*Math.pow(2,failures-1)):1000);}
+ }
+ function stopRequests(){++generation;clearTimeout(timer);if(controller)controller.abort();}
+ el('freeze').addEventListener('click',()=>{
+- frozen=!frozen;stopRequests();el('freeze').textContent=frozen?'表示を再開':'一時停止・保持';
+- if(frozen)el('status').textContent='一時停止・保持中（受信は継続）';
++ frozen=!frozen;stopRequests();el('freeze').textContent=frozen?'{{scopejs.23}}':'{{scopejs.24}}';
++ if(frozen)el('status').textContent='{{scopejs.25}}';
+  else{if(last)render(last,Date.now());schedule(0);}
+ });
+ el('gain').addEventListener('change',()=>{if(last)draw(last);});
+-document.addEventListener('visibilitychange',()=>{hidden=document.hidden;stopRequests();if(!hidden&&!frozen){blank('表示を再開・測定待ち...');schedule(0);}});
++document.addEventListener('visibilitychange',()=>{hidden=document.hidden;stopRequests();if(!hidden&&!frozen){blank('{{scopejs.26}}');schedule(0);}});
+ window.addEventListener('pagehide',()=>{hidden=true;stopRequests();});
+-hidden=document.hidden;blank('取得待ち...');schedule(0);
++hidden=document.hidden;blank('{{scopejs.27}}');schedule(0);
+--- v1.1/config.h
++++ v1.2/config.h
+@@ -1,14 +1,15 @@
+ #pragma once
+ 
+ #include <Arduino.h>
++#include "rf_channels.h"
+ 
+ // -----------------------------------------------------------------------------
+-// APRS iGate firmware v1.1 - fixed hardware definition for Rev0.1 PCB
++// APRS iGate firmware v1.2 - fixed hardware definition for Rev0.1 PCB
+ // Target: Seeed Studio XIAO ESP32C3 + DRA818V (RX only)
+ // -----------------------------------------------------------------------------
+ 
+ #define FW_NAME       "APRS-iGate-C3"
+-#define FW_VERSION    "1.1"
++#define FW_VERSION    "1.2"
+ 
+ // FIX3: ADC continuous DMA re-enabled for live AFSK receive.
+ // To isolate an ADC-related crash, temporarily set this to 1.
+@@ -25,7 +26,7 @@
+ static constexpr uint8_t PIN_SETUP_SW    = 10;  // D10 / GPIO10, switch to GND
+ 
+ // Japan APRS 1200bps AFSK: 144.660 MHz. 144.640 MHz is generally 9600bps.
+-// Web/NVS selects 144.6400 or 144.6600 MHz; default 144.6600.
++// Web/NVS selects an APRS preset from rf_channels.h; default 144.6600.
+ // TX field follows selected RX frequency; PTT is fixed to RX by hardware.
+ static constexpr const char *DEFAULT_DRA_RX_FREQ = "144.6600";
+ static constexpr uint8_t DRA_SQL         = 0;           // Monitor mode: avoid clipping packet edges
+--- v1.1/ota_uploader.js
++++ v1.2/ota_uploader.js
+@@ -33,28 +33,28 @@
+  }finally{clearTimeout(timer);}
+ }
+ function validate(d,allowNewBoot=false){
+- if(d.protocol!==9)throw new Fatal('対応するOTA状態を取得できません。本体ログと版番号を確認してください。');
++ if(d.protocol!==9)throw new Fatal('{{otajs.0}}');
+  if(d.boot!==token){
+   if(allowNewBoot&&d.previous_verified&&d.previous_sha256===fileSha&&d.previous_client===clientKey&&d.previous_size===fileSize)return 'rebooted';
+-  throw new Fatal('本体が再起動し、更新セッションが失われました。途中からの送信は行いません。');
++  throw new Fatal('{{otajs.1}}');
+  }
+- if(d.client!==clientKey||d.sha256!==fileSha||d.expected!==fileSize||!Number.isInteger(d.id)||d.id<=0)throw new Fatal('更新セッションまたはファイルが一致しません。別の更新を上書きしません。');
+- if(session&&session!==d.id)throw new Fatal('セッションIDが変わりました。再開を停止します。');
+- if(!Number.isInteger(d.received)||d.received<0||d.received>fileSize)throw new Fatal('受信位置が不正です。');
++ if(d.client!==clientKey||d.sha256!==fileSha||d.expected!==fileSize||!Number.isInteger(d.id)||d.id<=0)throw new Fatal('{{otajs.2}}');
++ if(session&&session!==d.id)throw new Fatal('{{otajs.3}}');
++ if(!Number.isInteger(d.received)||d.received<0||d.received>fileSize)throw new Fatal('{{otajs.4}}');
+  session=d.id;return 'same';
+ }
+-function progress(d){lastProgress=d.received;document.getElementById('p').value=d.received/fileSize*100;msg('本体受信確認: '+d.received+' / '+fileSize+' バイト ('+Math.floor(d.received/fileSize*100)+'%)\n再試行: '+retries+' 回');}
++function progress(d){lastProgress=d.received;document.getElementById('p').value=d.received/fileSize*100;msg('{{otajs.5}}'+d.received+' / '+fileSize+'{{otajs.6}}'+Math.floor(d.received/fileSize*100)+'{{otajs.7}}'+retries+'{{otajs.8}}');}
+ async function backoff(start,attempt,label,allowCancel=true){
+  if(allowCancel&&stop)throw new Cancelled();
+- if(performance.now()-start>=RETRY_BUDGET)throw new Fatal('約8分の再接続待ちで進捗を確認できませんでした。同じブラウザーで同じbinを選び直すと、セッションが残っていれば再開できます。本体は最終データ受信から10分で解除します。');
++ if(performance.now()-start>=RETRY_BUDGET)throw new Fatal('{{otajs.9}}');
+  const sec=Math.min(15,2**Math.min(attempt,4));++retries;
+- msg(label+' / 再接続待ち '+sec+'秒 / 再試行 '+retries+'回\n最終確認: '+lastProgress+' / '+fileSize+' バイト。電源とこのページを維持してください。');
++ msg(label+'{{otajs.10}}'+sec+'{{otajs.11}}'+retries+'{{otajs.12}}'+lastProgress+' / '+fileSize+'{{otajs.13}}');
+  await wait(sec*1000);
+  if(allowCancel&&stop)throw new Cancelled();
+ }
+ const query=()=>request('/update/status');
+ const suffix=()=>'?token='+token+'&id='+session+'&client='+clientKey;
+-function cancel(){if(!running)return;stop=true;msg('中止要求中。通信の復帰後、本体の中止確認を待ちます。');}
++function cancel(){if(!running)return;stop=true;msg('{{otajs.14}}');}
+ async function begin(){
+  const start=performance.now();let attempt=0,afterError=false;
+  while(true){
+@@ -62,12 +62,12 @@
+   try{
+    if(afterError){
+     const d=await query();
+-    if(d.protocol!==9||d.boot!==token)throw new Fatal('本体が再起動したか、OTA形式が異なります。更新ページを開き直してください。');
++    if(d.protocol!==9||d.boot!==token)throw new Fatal('{{otajs.15}}');
+     if(d.busy||d.verified){validate(d);return d;}
+-    if(d.client===clientKey&&d.error)throw new Fatal('本体が更新を解除しました: '+d.error);
++    if(d.client===clientKey&&d.error)throw new Fatal('{{otajs.16}}'+d.error);
+    }
+    const d=await request('/update/begin?token='+token+'&size='+fileSize+'&client='+clientKey+'&sha256='+fileSha,'');validate(d);return d;
+-  }catch(e){if(e instanceof Fatal)throw e;afterError=true;await backoff(start,attempt++,'開始応答を照合しています');}
++  }catch(e){if(e instanceof Fatal)throw e;afterError=true;await backoff(start,attempt++,'{{otajs.17}}');}
+  }
+ }
+ async function sendChunk(off,bytes){
+@@ -76,18 +76,18 @@
+  while(true){
+   if(stop)throw new Cancelled();
+   try{
+-   if(reconcile){const d=await query();validate(d);if(!d.busy||d.verified)throw new Fatal('送信中のセッションが終了しました: '+(d.error||'状態不一致'));if(d.received===end)return d;if(d.received!==off)throw new Fatal('予期しない受信位置です。二重送信を避けるため停止しました。');}
+-   const d=await request('/update/chunk'+suffix()+'&offset='+off,hex);validate(d);if(d.received!==end)throw new Fatal('ブロックの受信確認位置が一致しません。');return d;
+-  }catch(e){if(e instanceof Fatal)throw e;reconcile=true;await backoff(start,attempt++,'受信済み位置を照合しています');}
++   if(reconcile){const d=await query();validate(d);if(!d.busy||d.verified)throw new Fatal('{{otajs.18}}'+(d.error||'{{otajs.19}}'));if(d.received===end)return d;if(d.received!==off)throw new Fatal('{{otajs.20}}');}
++   const d=await request('/update/chunk'+suffix()+'&offset='+off,hex);validate(d);if(d.received!==end)throw new Fatal('{{otajs.21}}');return d;
++  }catch(e){if(e instanceof Fatal)throw e;reconcile=true;await backoff(start,attempt++,'{{otajs.22}}');}
+  }
+ }
+ async function finish(){
+  const start=performance.now();let attempt=0,reconcile=false;
+  while(true){
+   try{
+-   if(reconcile){const d=await query();const state=validate(d,true);if(state==='rebooted')return d;if(d.verified)return d;if(!d.busy)throw new Fatal('本体の検証が完了していません: '+(d.error||'セッション解除'));if(d.received!==fileSize)throw new Fatal('全量受信を確認できません。');}
+-   const d=await request('/update/finish'+suffix(),'');validate(d);if(!d.verified)throw new Fatal('検証成功を確認できません。');return d;
+-  }catch(e){if(e instanceof Fatal)throw e;reconcile=true;await backoff(start,attempt++,'検証結果と再起動後の記録を照合しています',false);}
++   if(reconcile){const d=await query();const state=validate(d,true);if(state==='rebooted')return d;if(d.verified)return d;if(!d.busy)throw new Fatal('{{otajs.23}}'+(d.error||'{{otajs.24}}'));if(d.received!==fileSize)throw new Fatal('{{otajs.25}}');}
++   const d=await request('/update/finish'+suffix(),'');validate(d);if(!d.verified)throw new Fatal('{{otajs.26}}');return d;
++  }catch(e){if(e instanceof Fatal)throw e;reconcile=true;await backoff(start,attempt++,'{{otajs.27}}',false);}
+  }
+ }
+ async function abort(){
+@@ -95,25 +95,25 @@
+  while(true){
+   try{
+    const d=await query();
+-   if(d.protocol===9&&d.boot===token&&!session&&!d.busy&&!d.verified&&d.client!==clientKey){forget();msg('送信開始前に中止しました。');return;}
++   if(d.protocol===9&&d.boot===token&&!session&&!d.busy&&!d.verified&&d.client!==clientKey){forget();msg('{{otajs.28}}');return;}
+    validate(d,true);
+-   if(d.verified||d.previous_verified&&d.previous_client===clientKey&&d.previous_sha256===fileSha)throw new Fatal('検証済みです。中止できません。再起動後の状態を確認してください。');
+-   if(!d.busy){forget();msg('更新セッションの終了を確認しました。通常処理へ戻ります。');return;}
+-   const a=await request('/update/abort'+suffix(),'');validate(a);if(a.busy||a.verified)throw new Fatal('中止を確認できません。');forget();msg('更新を中止しました。受信処理は再開されます。');return;
+-  }catch(e){if(e instanceof Fatal)throw e;await backoff(start,attempt++,'中止確認待ち',false);}
++   if(d.verified||d.previous_verified&&d.previous_client===clientKey&&d.previous_sha256===fileSha)throw new Fatal('{{otajs.29}}');
++   if(!d.busy){forget();msg('{{otajs.30}}');return;}
++   const a=await request('/update/abort'+suffix(),'');validate(a);if(a.busy||a.verified)throw new Fatal('{{otajs.31}}');forget();msg('{{otajs.32}}');return;
++  }catch(e){if(e instanceof Fatal)throw e;await backoff(start,attempt++,'{{otajs.33}}',false);}
+  }
+ }
+ async function check(){
+  const start=performance.now();let attempt=0;
+- while(true){try{const d=await query();msg('再接続しました。現在のファーム: '+d.firmware+' / 更新前: '+oldVersion+'。検証成功は確認済みです。本体ログ・稼働時間・接続状態を確認してください。');return;}catch(e){if(e instanceof Fatal){msg('再接続確認: '+e.message);return;}try{await backoff(start,attempt++,'検証成功済み。再起動後の接続を待っています',false);}catch(end){msg('検証成功済みですが再接続を確認できません。本体のIPとログを確認してください。');return;}}}
++ while(true){try{const d=await query();msg('{{otajs.34}}'+d.firmware+'{{otajs.35}}'+oldVersion+'{{otajs.36}}');return;}catch(e){if(e instanceof Fatal){msg('{{otajs.37}}'+e.message);return;}try{await backoff(start,attempt++,'{{otajs.38}}',false);}catch(end){msg('{{otajs.39}}');return;}}}
+ }
+ async function go(){
+- if(running)return;const f=document.getElementById('f').files[0];if(!f||!f.name.toLowerCase().endsWith('.bin')){msg('.bin を選択してください。');return;}
+- running=true;stop=false;session=0;retries=0;lastProgress=0;fileSize=f.size;
++ if(running)return;const f=document.getElementById('f').files[0];if(!f||!f.name.toLowerCase().endsWith('.bin')){msg('{{otajs.40}}');return;}
++ globalThis.igateOtaRunning=true;running=true;stop=false;session=0;retries=0;lastProgress=0;fileSize=f.size;
+  document.getElementById('go').disabled=true;document.getElementById('f').disabled=true;document.getElementById('cancel').disabled=false;
+  
+  try{
+-  msg('ファイルのSHA-256を計算しています...');fileSha=sha256(new Uint8Array(await f.arrayBuffer()));
++  msg('{{otajs.41}}');fileSha=sha256(new Uint8Array(await f.arrayBuffer()));
+   const prior=saved();clientKey=prior&&prior.boot===token&&prior.sha===fileSha&&prior.size===fileSize&&/^[a-f0-9]{32}$/.test(prior.client)?prior.client:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');persist();
+   const b=await begin();oldVersion=b.firmware;
+   if(b.verified){await finish();}else{
+@@ -121,12 +121,12 @@
+    for(let off=b.received;off<fileSize;){if(stop)throw new Cancelled();const bytes=new Uint8Array(await f.slice(off,off+CHUNK).arrayBuffer());const d=await sendChunk(off,bytes);off=d.received;progress(d);await wait(20);}
+    if(stop)throw new Cancelled();await finish();
+   }
+-  forget();msg('全データの受信・SHA-256照合・イメージ検証が完了しました。約30秒後に再接続を確認します。');setTimeout(check,30000);
++  forget();msg('{{otajs.42}}');setTimeout(check,30000);
+  }catch(e){
+   if(e instanceof Cancelled){
+    // A begin ACK can be lost: query by saved client/file identity before aborting.
+-   if(clientKey){try{await abort();}catch(a){msg('中止を確認できません: '+a.message+'\n本体ログを確認してください。');}}
+-   else msg('送信開始前に中止しました。');
+-  }else msg('更新の完了を確認できません: '+e.message+'\n通信断だけでは成功とは判断しません。本体ログを確認してください。セッションが残っていれば同じbinで再開できます。');
+- }finally{running=false;document.getElementById('go').disabled=false;document.getElementById('f').disabled=false;document.getElementById('cancel').disabled=true;}
++   if(clientKey){try{await abort();}catch(a){msg('{{otajs.43}}'+a.message+'{{otajs.44}}');}}
++   else msg('{{otajs.28}}');
++  }else msg('{{otajs.45}}'+e.message+'{{otajs.46}}');
++ }finally{globalThis.igateOtaRunning=false;running=false;document.getElementById('go').disabled=false;document.getElementById('f').disabled=false;document.getElementById('cancel').disabled=true;}
+ }
+--- v1.1/rf_channels.h
++++ v1.2/rf_channels.h
+@@ -0,0 +1,12 @@
++#pragma once
++struct RfChannel { const char *frequency; const char *label; };
++static constexpr RfChannel RF_CHANNELS[] = {
++  {"144.6400", "144.640 MHz"},
++  {"144.6600", "144.660 MHz (JA)"},
++  {"144.3900", "144.390 MHz (US)"},
++  {"144.8000", "144.800 MHz (EU)"},
++  {"145.1750", "145.175 MHz (AU)"},
++  {"144.5750", "144.575 MHz (NZ)"},
++  {"144.9300", "144.930 MHz (AR)"},
++  {"145.5700", "145.570 MHz (BR)"}
++};
+--- v1.1/settings.h
++++ v1.2/settings.h
+@@ -73,7 +73,10 @@
+   }
+ 
+   static bool validRxFrequency(const String &frequency) {
+-    return frequency == "144.6600" || frequency == "144.6400";
++    for (const auto &channel : RF_CHANNELS) {
++      if (frequency == channel.frequency) return true;
++    }
++    return false;
+   }
+ 
+   static String rxFrequencyLabel(const AppConfig &cfg) {
+--- v1.1/ui_page.h
++++ v1.2/ui_page.h
+@@ -0,0 +1,49 @@
++#pragma once
++#include "ui_texts.h"
++
++// Language is a presentation preference in the URL. No NVS writes or reboot.
++// New requests default to Japanese; explicit lang=en is the only English mode.
++static inline bool uiEnglish(WebServer &s) { return s.arg("lang") == "en"; }
++static inline void uiRenderPageInPlace(String &page, bool english) {
++  const char *lang = english ? "en" : "ja";
++  page.replace("<html>", "<html lang='ja'>");
++  if (english) {
++    page.replace("<html lang='ja'>", "<html lang='en'>");
++    page.replace("<html lang=\"ja\">", "<html lang=\"en\">");
++  }
++  // Rewrite only known navigation targets, never tokens, API paths or raw logs.
++  for (const char *path : {"/", "/audio", "/rxdiag", "/logs", "/update"}) {
++    for (const char *quote : {"'", "\""}) {
++      String from = String("href=") + quote + path + quote;
++      String to = String("href=") + quote + path + "?lang=" + lang + quote;
++      page.replace(from.c_str(), to.c_str());
++    }
++  }
++  for (const char *path : {"/save", "/reboot", "/factory", "/adc/recover"}) {
++    String from = String("action='") + path + "'";
++    String to = String("action='") + path + "?lang=" + lang + "'";
++    page.replace(from.c_str(), to.c_str());
++  }
++  for (const char *path : {"/logs.txt", "/rxdiag.csv"}) {
++    String from = String("href='") + path + "?download=1'";
++    String to = String("href='") + path + "?download=1&amp;lang=" + lang + "'";
++    page.replace(from.c_str(), to.c_str());
++  }
++  String redirect = String("60;url=/?lang=") + lang;
++  page.replace("60;url=/", redirect.c_str());
++  const char *languagePath = std::strstr(page.c_str(), "http-equiv='refresh'") ? "/" : "";
++  String nav = F("<nav style='margin:12px 0;font-family:system-ui' aria-label='Language'>");
++  nav += english ? F("<a onclick='return !globalThis.igateOtaRunning' href='") : F("<strong>日本語</strong> | <a onclick='return !globalThis.igateOtaRunning' href='");
++  nav += languagePath;
++  nav += english ? F("?lang=ja'>日本語</a> | <strong>English</strong>") : F("?lang=en'>English</a>");
++  nav += F("</nav><h1");
++  page.replace("<h1", nav.c_str());
++  for (const auto &t : UI_TEXTS) page.replace(t.marker, english ? t.en : t.ja);
++}
++static inline String uiRenderPage(String page, bool english) {
++  uiRenderPageInPlace(page, english); return page;
++}
++static inline void sendUiPage(WebServer &s, String page) {
++  uiRenderPageInPlace(page, uiEnglish(s));
++  s.send(200, "text/html; charset=utf-8", page);
++}
+--- v1.1/ui_texts.json
++++ v1.2/ui_texts.json
+@@ -0,0 +1,806 @@
++{
++  "rf.title": {
++    "ja": "受信周波数",
++    "en": "Receive frequency"
++  },
++  "rf.default": {
++    "ja": "初期値",
++    "en": "default"
++  },
++  "rf.note": {
++    "ja": "全周波数で1200bps AFSKです。日本の一般的な1200bps運用は144.660MHz、144.640MHzは一般に9600bps用です。本機は9600bpsの復調には対応していません。地域表示は代表例です。変更は保存・再起動後に反映します。",
++    "en": "All presets use 1200bps AFSK. In Japan, 144.660MHz normally uses 1200bps and 144.640MHz normally uses 9600bps. This device does not decode 9600bps. Region labels are examples. Save and reboot to apply changes."
++  },
++  "field.ssid": {
++    "ja": "Wi-Fi SSID",
++    "en": "Wi-Fi SSID"
++  },
++  "field.wpass": {
++    "ja": "Wi-Fiパスワード",
++    "en": "Wi-Fi password"
++  },
++  "field.call": {
++    "ja": "iGateコールサイン・SSID",
++    "en": "iGate callsign-SSID"
++  },
++  "field.apass": {
++    "ja": "APRS-ISパスコード",
++    "en": "APRS-IS passcode"
++  },
++  "field.server": {
++    "ja": "APRS-ISサーバー",
++    "en": "APRS-IS server"
++  },
++  "field.port": {
++    "ja": "ポート",
++    "en": "Port"
++  },
++  "field.grid": {
++    "ja": "グリッド（保存のみ）",
++    "en": "Grid (stored only)"
++  },
++  "field.comment": {
++    "ja": "コメント",
++    "en": "Comment"
++  },
++  "field.lat": {
++    "ja": "緯度（十進度・南緯は負）",
++    "en": "Latitude (decimal degrees, south negative)"
++  },
++  "field.lon": {
++    "ja": "経度（十進度・西経は負）",
++    "en": "Longitude (decimal degrees, west negative)"
++  },
++  "field.otapass": {
++    "ja": "OTAパスワード（8～63文字・空欄で保持）",
++    "en": "OTA password (8-63 characters; blank keeps current)"
++  },
++  "main.ip": {
++    "ja": "IP:",
++    "en": "IP:"
++  },
++  "main.uptime": {
++    "ja": "稼働時間:",
++    "en": "Uptime:"
++  },
++  "main.decoded": {
++    "ja": "復調:",
++    "en": "Decoded:"
++  },
++  "main.gated": {
++    "ja": "転送:",
++    "en": "Gated:"
++  },
++  "main.dup": {
++    "ja": "重複:",
++    "en": "Duplicates:"
++  },
++  "main.blocked": {
++    "ja": "除外:",
++    "en": "Blocked:"
++  },
++  "main.crc": {
++    "ja": "CRC不一致:",
++    "en": "CRC bad:"
++  },
++  "main.rms": {
++    "ja": "AF RMS:",
++    "en": "AF RMS:"
++  },
++  "main.last": {
++    "ja": "最終受信:",
++    "en": "Last RX:"
++  },
++  "main.clock": {
++    "ja": "時刻:",
++    "en": "Clock:"
++  },
++  "main.beacons": {
++    "ja": "自局ビーコンTCP送出:",
++    "en": "Position beacon TCP writes:"
++  },
++  "field.keep": {
++    "ja": "空欄で保存済み値を保持",
++    "en": "Blank keeps current"
++  },
++  "main.monitor": {
++    "ja": "AFSK受信モニター（1秒更新）",
++    "en": "AFSK receive monitor (updates every second)"
++  },
++  "main.loading": {
++    "ja": "モニター取得中...",
++    "en": "Loading monitor..."
++  },
++  "main.hint": {
++    "ja": "ADC最小・最大は直近250msの生コードです。1200/2200Hz値は検出強度で、校正済みdBではありません。ピークは約5秒保持します。",
++    "en": "ADC Min/Max are raw codes over the last 250ms. Tone values are detector magnitudes, not calibrated dB. RMS peak is held for about 5 seconds."
++  },
++  "field.beacon": {
++    "ja": "自局位置をAPRS-ISへ送る（30分間隔）",
++    "en": "Send own position to APRS-IS (every 30 minutes)"
++  },
++  "button.save": {
++    "ja": "保存・再起動",
++    "en": "Save &amp; Reboot"
++  },
++  "link.rx": {
++    "ja": "受信変化の記録",
++    "en": "RX diagnostics"
++  },
++  "link.audio": {
++    "ja": "音声入力モニター / 波形・レベル",
++    "en": "Audio input monitor / waveform and level"
++  },
++  "link.logs": {
++    "ja": "本体ログ",
++    "en": "Device log"
++  },
++  "link.ota": {
++    "ja": "ファームウェア更新（OTA）",
++    "en": "Firmware update (OTA)"
++  },
++  "main.admin": {
++    "ja": "ユーザー名: admin",
++    "en": "User: admin"
++  },
++  "button.adc": {
++    "ja": "ADC取り込みを復旧",
++    "en": "Recover ADC capture"
++  },
++  "main.maintenance": {
++    "ja": "保守操作",
++    "en": "Maintenance"
++  },
++  "confirm.factory": {
++    "ja": "保存設定をすべて消去しますか？",
++    "en": "Erase all saved settings?"
++  },
++  "button.reboot": {
++    "ja": "再起動",
++    "en": "Reboot"
++  },
++  "button.factory": {
++    "ja": "設定を初期化",
++    "en": "Factory reset"
++  },
++  "main.buttonhint": {
++    "ja": "SETUPボタン: 短押しでLCDを60秒点灯 / 15分ごとに24秒自動点灯 / 5秒で設定AP / 15秒で全設定消去。設定APパスワード:",
++    "en": "SETUP: short press lights LCD for 60s / automatic 24s every 15 minutes / 5s opens setup AP / 15s erases all settings. Setup AP password:"
++  },
++  "reboot.title": {
++    "ja": "再起動中です",
++    "en": "Rebooting"
++  },
++  "reboot.wait": {
++    "ja": "60秒後にトップ画面へ自動で戻ります。",
++    "en": "Returning to the main page automatically in 60 seconds."
++  },
++  "reboot.home": {
++    "ja": "トップ画面を開く",
++    "en": "Open the main page"
++  },
++  "reboot.ip": {
++    "ja": "本機のIPアドレスが変わった場合は、新しいアドレスで開いてください。",
++    "en": "If the device IP address changed, open its new address."
++  },
++  "live.unavailable": {
++    "ja": "モニター取得失敗: ",
++    "en": "Monitor unavailable: "
++  },
++  "live.decoded": {
++    "ja": " | 復調: ",
++    "en": " | Decoded: "
++  },
++  "live.samples": {
++    "ja": " | サンプル: ",
++    "en": " | Samples: "
++  },
++  "live.errors": {
++    "ja": " | 読取エラー: ",
++    "en": " | Read errors: "
++  },
++  "live.timeout": {
++    "ja": " | タイムアウト: ",
++    "en": " | Timeouts: "
++  },
++  "live.age": {
++    "ja": " | データ経過: ",
++    "en": " | Data age: "
++  },
++  "live.rate": {
++    "ja": " | 取得速度: ",
++    "en": " | Capture rate: "
++  },
++  "live.recovery": {
++    "ja": " | 復旧試行/成功: ",
++    "en": " | Recovery attempts/success: "
++  },
++  "live.discarded": {
++    "ja": " | 破棄: ",
++    "en": " | Discarded: "
++  },
++  "live.stack": {
++    "ja": " | スタック空き: ",
++    "en": " | Stack free: "
++  },
++  "live.block": {
++    "ja": " | 最大処理区間: ",
++    "en": " | Max block: "
++  },
++  "error.rf": {
++    "ja": "受信周波数を一覧から選択してください。",
++    "en": "Select a receive frequency from the preset list."
++  },
++  "error.password": {
++    "ja": "OTAパスワードは8～63文字で指定してください。",
++    "en": "OTA password must be 8-63 characters."
++  },
++  "error.position": {
++    "ja": "位置ビーコンには有効な緯度・経度が必要です。",
++    "en": "Valid latitude and longitude are required for the position beacon."
++  },
++  "error.config": {
++    "ja": "SSIDまたはコールサインが不正です。",
++    "en": "SSID or callsign is invalid."
++  },
++  "error.save": {
++    "ja": "設定を保存できませんでした。",
++    "en": "Failed to save settings."
++  },
++  "saved": {
++    "ja": "設定を保存しました。再起動します。",
++    "en": "Settings saved. Rebooting..."
++  },
++  "erased": {
++    "ja": "設定を消去しました。再起動します。",
++    "en": "Settings erased. Rebooting..."
++  },
++  "restarting": {
++    "ja": "再起動します。",
++    "en": "Rebooting..."
++  },
++  "error.busy": {
++    "ja": "OTA更新中です。完了または中止を待ってください。",
++    "en": "OTA in progress. Finish or cancel it first."
++  },
++  "adc.requested": {
++    "ja": "ADC復旧を予約しました。管理画面でサンプル増加と本体ログを確認してください。",
++    "en": "ADC recovery requested. Check sample progress and device logs on the main page."
++  },
++  "error.adc": {
++    "ja": "ADC未初期化です。本体を再起動してください。",
++    "en": "ADC is not initialized. Reboot required."
++  },
++  "logs.title": {
++    "ja": "本体ログ",
++    "en": "Device log"
++  },
++  "logs.hint": {
++    "ja": "最大4KB / 古い行から上書き / NTP同期後はJST日時と経過時間、同期前はUNSYNC表示。RAMログは再起動・電源断で消えます。",
++    "en": "Up to 4KB; oldest lines are overwritten. After NTP sync, timestamps use JST and uptime; otherwise UNSYNC. RAM logs are lost on reboot or power loss."
++  },
++  "logs.refresh": {
++    "ja": "更新",
++    "en": "Refresh"
++  },
++  "logs.download": {
++    "ja": "ダウンロード",
++    "en": "Download"
++  },
++  "logs.clear": {
++    "ja": "ログ消去",
++    "en": "Clear log"
++  },
++  "logs.back": {
++    "ja": "管理画面へ戻る",
++    "en": "Back to main page"
++  },
++  "logs.loading": {
++    "ja": "読み込み中...",
++    "en": "Loading..."
++  },
++  "logs.failure": {
++    "ja": "ログ取得失敗: ",
++    "en": "Log fetch failed: "
++  },
++  "logs.confirm": {
++    "ja": "ログを消去しますか？",
++    "en": "Clear the log?"
++  },
++  "logs.clearfail": {
++    "ja": "消去失敗: ",
++    "en": "Clear failed: "
++  },
++  "rx.title": {
++    "ja": "受信変化の記録",
++    "en": "RX diagnostics"
++  },
++  "rx.hint": {
++    "ja": "音声・トーン・ADC・復調カウンターの怪しい変化を記録します。APRS受信の確定判定ではありません。最大4件、古いイベントから上書き。再起動・電源断で消えます。",
++    "en": "Records changes in audio, tones, ADC and decoder counters. Events do not prove an APRS reception. Up to 4 events; oldest overwritten. Lost on reboot or power loss."
++  },
++  "rx.window": {
++    "ja": "約20msごと / 直前最大8行＋変化後、合計最大48行（約0.96秒）。トーンは各区間末尾の値、RMSは平滑電力の区間平均です。通信処理の遅れに左右されずADCタスクで記録します。",
++    "en": "About 20ms per row; up to 8 pre-trigger rows and 48 rows total (about 0.96s). Tones are end-of-window detector values; RMS averages smoothed power. Captured in the ADC task independently of HTTP timing."
++  },
++  "rx.holdhint": {
++    "ja": "送信後は「記録停止」で保持してからダウンロードしてください。待機時の雑音でも反応するため、記録が流れる場合があります。「手動記録」は次の区間から記録を開始します。",
++    "en": "After transmitting, freeze the records before downloading. Idle noise may trigger and overwrite events. Manual capture starts at the next interval."
++  },
++  "rx.freeze": {
++    "ja": "記録停止",
++    "en": "Freeze records"
++  },
++  "rx.resume": {
++    "ja": "記録再開",
++    "en": "Resume recording"
++  },
++  "rx.manual": {
++    "ja": "手動記録",
++    "en": "Manual capture"
++  },
++  "rx.clear": {
++    "ja": "記録消去・再開",
++    "en": "Clear and resume"
++  },
++  "rx.refresh": {
++    "ja": "表示更新",
++    "en": "Refresh"
++  },
++  "rx.csv": {
++    "ja": "CSVダウンロード",
++    "en": "Download CSV"
++  },
++  "rx.log": {
++    "ja": "本体ログ",
++    "en": "Device log"
++  },
++  "rx.back": {
++    "ja": "管理画面へ戻る",
++    "en": "Back to main page"
++  },
++  "rx.loading": {
++    "ja": "読み込み中...",
++    "en": "Loading..."
++  },
++  "rx.reason": {
++    "ja": "reason（ビット合計）: 1=RMS上下変化、2=トーン合計変化、4=トーン比変化、8=ADC端付近、16=CRC増加、32=正常フレーム、64=フレーム/DMA/読取異常、128=手動。trigger=1の行が開始点。adc_valid=0は有効なADCデータがない行です。差分カウンターは前の記録区間からの増分です。",
++    "en": "reason bit mask: 1=RMS change, 2=tone sum, 4=tone balance, 8=ADC edge, 16=CRC increase, 32=valid frame, 64=frame/DMA/read fault, 128=manual. trigger=1 marks the trigger row. adc_valid=0 means no valid ADC measurement. Delta counters are changes since the preceding interval."
++  },
++  "rx.fetchfail": {
++    "ja": "取得失敗: ",
++    "en": "Fetch failed: "
++  },
++  "rx.confirm": {
++    "ja": "診断記録を消去して再開しますか？",
++    "en": "Clear diagnostic records and resume?"
++  },
++  "rx.opfail": {
++    "ja": "操作失敗: ",
++    "en": "Operation failed: "
++  },
++  "scope.title": {
++    "ja": "音声入力モニター",
++    "en": "Audio input monitor"
++  },
++  "scope.main": {
++    "ja": "管理画面",
++    "en": "Main page"
++  },
++  "scope.rx": {
++    "ja": "受信変化の記録",
++    "en": "RX diagnostics"
++  },
++  "scope.logs": {
++    "ja": "本体ログ",
++    "en": "Device log"
++  },
++  "scope.intro": {
++    "ja": "同じ周波数のFMで「あー → 無音 → あー」と数秒ずつ区切り、声に同期する変化を確認します。<b>電波のSメーターではなく、ESP32のADCに届いた音声の強さです。</b> FMは無信号時の雑音のほうが大きく、受信するとレベルが下がる場合もあります。",
++    "en": "Transmit voice, silence, then voice on the same FM frequency and watch for matching changes. <b>This is audio reaching the ESP32 ADC, not RF signal strength.</b> Idle FM noise may be louder than received audio."
++  },
++  "scope.freeze": {
++    "ja": "一時停止・保持",
++    "en": "Pause and hold"
++  },
++  "scope.gain": {
++    "ja": "表示倍率",
++    "en": "Display gain"
++  },
++  "scope.fixed": {
++    "ja": "固定",
++    "en": "Fixed"
++  },
++  "scope.auto": {
++    "ja": "自動拡大（DC除去）",
++    "en": "Auto scale (DC removed)"
++  },
++  "scope.waiting": {
++    "ja": "取得待ち...",
++    "en": "Waiting for capture..."
++  },
++  "scope.meterlabel": {
++    "ja": "音声入力 AC RMS dBFS",
++    "en": "Audio input AC RMS dBFS"
++  },
++  "scope.meterhint": {
++    "ja": "緑：直近200msのAC RMS ／ 赤線：本体で連続集計した直近約5秒の最大40ms AC RMS。2048 ADCコードを0 dBFSの基準とします。停止中は保持します。",
++    "en": "Green: latest 200ms AC RMS. Red: maximum 40ms AC RMS over about 5 seconds, accumulated on the device. 2048 ADC codes is the 0 dBFS reference. Pausing holds the display."
++  },
++  "scope.await": {
++    "ja": "有効な測定を待っています。",
++    "en": "Waiting for valid measurements."
++  },
++  "scope.canvas": {
++    "ja": "ADC入力波形",
++    "en": "ADC input waveform"
++  },
++  "scope.range": {
++    "ja": "表示範囲：ADC 0〜4095 ／ ×1 ／ 中心2048",
++    "en": "Range: ADC 0-4095 / x1 / center 2048"
++  },
++  "scope.wavehint": {
++    "ja": "1枚約40ms、4サンプルごとの最小・最大を縦線表示。横軸は0〜40ms、縦軸はADCコードです。自動拡大では倍率・中心を明示します。入力端付近は赤色で警告します。ADCコードから電圧への校正は行っていません。",
++    "en": "Each frame covers about 40ms. Vertical lines show min/max for each group of four samples. X: milliseconds; Y: ADC codes. Auto scale shows gain and center. Near-edge input is red. ADC codes are not voltage-calibrated."
++  },
++  "scope.bottom": {
++    "ja": "約1秒間隔で表示を更新します。音量と赤いピーク線は、閲覧中は本体で全40ms区間を連続集計します。波形は最新40msの抜粋で、連続録音ではありません。表示中のみ波形計算を行い、非表示・停止後は約3秒で休止。通信が遅い場合は重ねて要求せず再試行します。ブラウザーの一時停止はこの画面の表示だけを保持し、APRS受信を止めません。",
++    "en": "Refreshes about once per second. While viewed, the device accumulates every 40ms window for the level and peak. The waveform is only the latest 40ms, not continuous audio recording. Scope work pauses about 3s after viewing stops. Slow requests are retried without overlap. Pausing this display does not stop APRS reception."
++  },
++  "scopejs.0": {
++    "ja": "表示倍率 ×",
++    "en": "Display gain x"
++  },
++  "scopejs.1": {
++    "ja": "（自動・DC除去）",
++    "en": " (auto, DC removed)"
++  },
++  "scopejs.2": {
++    "ja": "（固定）",
++    "en": " (fixed)"
++  },
++  "scopejs.3": {
++    "ja": " ／ 中心ADC ",
++    "en": " / ADC center "
++  },
++  "scopejs.4": {
++    "ja": " ／ 1枚 ",
++    "en": " / frame "
++  },
++  "scopejs.5": {
++    "ja": "音量（200ms AC RMS） ",
++    "en": "Level (200ms AC RMS) "
++  },
++  "scopejs.6": {
++    "ja": "%) ／ 5秒ピーク ",
++    "en": "%) / 5s peak "
++  },
++  "scopejs.7": {
++    "ja": " ／ 波形40ms RMS ",
++    "en": " / waveform 40ms RMS "
++  },
++  "scopejs.8": {
++    "ja": " ／ 波形ピーク ",
++    "en": " / waveform peak "
++  },
++  "scopejs.9": {
++    "ja": " ／ ADC平均 ",
++    "en": " / ADC mean "
++  },
++  "scopejs.10": {
++    "ja": " ／ Min/Max ",
++    "en": " / Min/Max "
++  },
++  "scopejs.11": {
++    "ja": " ／ 端付近 ",
++    "en": " / near edge "
++  },
++  "scopejs.12": {
++    "ja": "有効な測定なし。音量ゼロを意味しません。",
++    "en": "No valid measurement. This does not mean zero audio."
++  },
++  "scopejs.13": {
++    "ja": "OTA中・音声モニター休止",
++    "en": "OTA active; audio monitor paused"
++  },
++  "scopejs.14": {
++    "ja": "測定待ち / ",
++    "en": "Waiting for measurement / "
++  },
++  "scopejs.15": {
++    "ja": " ／ 古い波形は表示しません。",
++    "en": " / stale waveform hidden."
++  },
++  "scopejs.16": {
++    "ja": "取得中 ／ 本体の記録時点 ",
++    "en": "Capturing / device state "
++  },
++  "scopejs.17": {
++    "ja": " ／ 取得時の波形経過 ",
++    "en": " / waveform age at fetch "
++  },
++  "scopejs.18": {
++    "ja": " ms ／ 通信所要 ",
++    "en": " ms / request time "
++  },
++  "scopejs.19": {
++    "ja": " ms ／ 取得番号 ",
++    "en": " ms / sequence "
++  },
++  "scopejs.20": {
++    "ja": " ／ ADC端付近あり（入力レベル・バイアスを確認）",
++    "en": " / ADC near edge (check level and bias)"
++  },
++  "scopejs.21": {
++    "ja": "通信待ち：",
++    "en": "Waiting for connection: "
++  },
++  "scopejs.22": {
++    "ja": " ／ 再試行します。",
++    "en": " / retrying."
++  },
++  "scopejs.23": {
++    "ja": "表示を再開",
++    "en": "Resume display"
++  },
++  "scopejs.24": {
++    "ja": "一時停止・保持",
++    "en": "Pause and hold"
++  },
++  "scopejs.25": {
++    "ja": "一時停止・保持中（受信は継続）",
++    "en": "Paused and held (reception continues)"
++  },
++  "scopejs.26": {
++    "ja": "表示を再開・測定待ち...",
++    "en": "Resuming; waiting for measurement..."
++  },
++  "scopejs.27": {
++    "ja": "取得待ち...",
++    "en": "Waiting for capture..."
++  },
++  "otajs.0": {
++    "ja": "対応するOTA状態を取得できません。本体ログと版番号を確認してください。",
++    "en": "Compatible OTA status unavailable. Check the device log and firmware version."
++  },
++  "otajs.1": {
++    "ja": "本体が再起動し、更新セッションが失われました。途中からの送信は行いません。",
++    "en": "Device rebooted and the update session was lost. The partial transfer will not resume."
++  },
++  "otajs.2": {
++    "ja": "更新セッションまたはファイルが一致しません。別の更新を上書きしません。",
++    "en": "Update session or file mismatch. Another update will not be overwritten."
++  },
++  "otajs.3": {
++    "ja": "セッションIDが変わりました。再開を停止します。",
++    "en": "Session ID changed. Resume stopped."
++  },
++  "otajs.4": {
++    "ja": "受信位置が不正です。",
++    "en": "Invalid receive offset."
++  },
++  "otajs.5": {
++    "ja": "本体受信確認: ",
++    "en": "Device confirmed: "
++  },
++  "otajs.6": {
++    "ja": " バイト (",
++    "en": " bytes ("
++  },
++  "otajs.7": {
++    "ja": "%)\\n再試行: ",
++    "en": "%)\\nRetries: "
++  },
++  "otajs.8": {
++    "ja": " 回",
++    "en": " times"
++  },
++  "otajs.9": {
++    "ja": "約8分の再接続待ちで進捗を確認できませんでした。同じブラウザーで同じbinを選び直すと、セッションが残っていれば再開できます。本体は最終データ受信から10分で解除します。",
++    "en": "No progress confirmed after about 8 minutes of reconnect attempts. Select the same bin in the same browser to resume if the session remains. The device releases it 10 minutes after the last new data."
++  },
++  "otajs.10": {
++    "ja": " / 再接続待ち ",
++    "en": " / reconnect in "
++  },
++  "otajs.11": {
++    "ja": "秒 / 再試行 ",
++    "en": "s / retries "
++  },
++  "otajs.12": {
++    "ja": "回\\n最終確認: ",
++    "en": "\\nLast confirmed: "
++  },
++  "otajs.13": {
++    "ja": " バイト。電源とこのページを維持してください。",
++    "en": " bytes. Keep power and this page active."
++  },
++  "otajs.14": {
++    "ja": "中止要求中。通信の復帰後、本体の中止確認を待ちます。",
++    "en": "Cancel requested. Waiting for the device to confirm after reconnecting."
++  },
++  "otajs.15": {
++    "ja": "本体が再起動したか、OTA形式が異なります。更新ページを開き直してください。",
++    "en": "Device rebooted or OTA protocol differs. Reopen the update page."
++  },
++  "otajs.16": {
++    "ja": "本体が更新を解除しました: ",
++    "en": "Device released the update: "
++  },
++  "otajs.17": {
++    "ja": "開始応答を照合しています",
++    "en": "Reconciling the start response"
++  },
++  "otajs.18": {
++    "ja": "送信中のセッションが終了しました: ",
++    "en": "Transfer session ended: "
++  },
++  "otajs.19": {
++    "ja": "状態不一致",
++    "en": "State mismatch"
++  },
++  "otajs.20": {
++    "ja": "予期しない受信位置です。二重送信を避けるため停止しました。",
++    "en": "Unexpected receive offset. Stopped to avoid duplicate writes."
++  },
++  "otajs.21": {
++    "ja": "ブロックの受信確認位置が一致しません。",
++    "en": "Confirmed block offset does not match."
++  },
++  "otajs.22": {
++    "ja": "受信済み位置を照合しています",
++    "en": "Reconciling received offset"
++  },
++  "otajs.23": {
++    "ja": "本体の検証が完了していません: ",
++    "en": "Device verification incomplete: "
++  },
++  "otajs.24": {
++    "ja": "セッション解除",
++    "en": "Session released"
++  },
++  "otajs.25": {
++    "ja": "全量受信を確認できません。",
++    "en": "Full image receipt not confirmed."
++  },
++  "otajs.26": {
++    "ja": "検証成功を確認できません。",
++    "en": "Successful verification not confirmed."
++  },
++  "otajs.27": {
++    "ja": "検証結果と再起動後の記録を照合しています",
++    "en": "Reconciling verification and reboot records"
++  },
++  "otajs.28": {
++    "ja": "送信開始前に中止しました。",
++    "en": "Cancelled before transfer started."
++  },
++  "otajs.29": {
++    "ja": "検証済みです。中止できません。再起動後の状態を確認してください。",
++    "en": "Already verified; cancellation is unavailable. Check the state after reboot."
++  },
++  "otajs.30": {
++    "ja": "更新セッションの終了を確認しました。通常処理へ戻ります。",
++    "en": "Update session ended. Returning to normal operation."
++  },
++  "otajs.31": {
++    "ja": "中止を確認できません。",
++    "en": "Cancellation not confirmed."
++  },
++  "otajs.32": {
++    "ja": "更新を中止しました。受信処理は再開されます。",
++    "en": "Update cancelled. Reception will resume."
++  },
++  "otajs.33": {
++    "ja": "中止確認待ち",
++    "en": "Waiting for cancel confirmation"
++  },
++  "otajs.34": {
++    "ja": "再接続しました。現在のファーム: ",
++    "en": "Reconnected. Current firmware: "
++  },
++  "otajs.35": {
++    "ja": " / 更新前: ",
++    "en": " / previous: "
++  },
++  "otajs.36": {
++    "ja": "。検証成功は確認済みです。本体ログ・稼働時間・接続状態を確認してください。",
++    "en": ". Verification succeeded. Check the device log, uptime and connections."
++  },
++  "otajs.37": {
++    "ja": "再接続確認: ",
++    "en": "Reconnect check: "
++  },
++  "otajs.38": {
++    "ja": "検証成功済み。再起動後の接続を待っています",
++    "en": "Verified. Waiting for the device to reconnect after reboot"
++  },
++  "otajs.39": {
++    "ja": "検証成功済みですが再接続を確認できません。本体のIPとログを確認してください。",
++    "en": "Verified, but reconnection could not be confirmed. Check the device IP and logs."
++  },
++  "otajs.40": {
++    "ja": ".bin を選択してください。",
++    "en": "Select a .bin file."
++  },
++  "otajs.41": {
++    "ja": "ファイルのSHA-256を計算しています...",
++    "en": "Computing file SHA-256..."
++  },
++  "otajs.42": {
++    "ja": "全データの受信・SHA-256照合・イメージ検証が完了しました。約30秒後に再接続を確認します。",
++    "en": "Full image received, SHA-256 matched and image verified. Checking reconnection in about 30 seconds."
++  },
++  "otajs.43": {
++    "ja": "中止を確認できません: ",
++    "en": "Cancellation not confirmed: "
++  },
++  "otajs.44": {
++    "ja": "\\n本体ログを確認してください。",
++    "en": "\\nCheck the device log."
++  },
++  "otajs.45": {
++    "ja": "更新の完了を確認できません: ",
++    "en": "Update completion not confirmed: "
++  },
++  "otajs.46": {
++    "ja": "\\n通信断だけでは成功とは判断しません。本体ログを確認してください。セッションが残っていれば同じbinで再開できます。",
++    "en": "\\nConnection loss alone does not prove success. Check the device log. Resume with the same bin if the session remains."
++  },
++  "ota.title": {
++    "ja": "ファームウェア更新 v1.2",
++    "en": "Firmware update v1.2"
++  },
++  "ota.intro": {
++    "ja": "本機用のアプリ単体 .bin を選択してください。更新中は受信・転送を一時休止します。電源を維持し、ブラウザーのスリープを避けてください。",
++    "en": "Choose the application-only .bin for this device. Reception and forwarding pause during updates. Keep power connected and prevent browser sleep."
++  },
++  "ota.hint": {
++    "ja": "通信断は自動再試行（進捗がない状態で最大約8分）。本体は最終データ受信から10分で解除します。遅くても進捗があれば継続します。ページを開き直した場合は、同じブラウザーで同じbinを選択し「更新開始・再開」を押してください。保存領域を利用できないブラウザーではページ再読込後の再開はできません。",
++    "en": "Connection loss triggers retries, for up to about 8 minutes without progress. The device releases the session 10 minutes after the last new data. Slow transfers continue while progressing. To resume after reopening, select the same bin in the same browser and press Start or resume. Resume across reloads requires browser storage."
++  },
++  "ota.start": {
++    "ja": "更新開始・再開",
++    "en": "Start or resume"
++  },
++  "ota.cancel": {
++    "ja": "中止",
++    "en": "Cancel"
++  },
++  "ota.wait": {
++    "ja": "待機中 / 受信位置とファイルSHA-256を照合して続行します。",
++    "en": "Ready / resume checks the receive offset and file SHA-256."
++  },
++  "ota.logs": {
++    "ja": "本体ログ",
++    "en": "Device log"
++  },
++  "ota.back": {
++    "ja": "管理画面へ戻る",
++    "en": "Back to main page"
++  },
++  "lang": {
++    "ja": "ja",
++    "en": "en"
++  },
++  "rx.frozen": {
++    "ja": "記録停止。保存した記録は保持されています。",
++    "en": "Recording frozen. Stored events are retained."
++  },
++  "rx.accepted": {
++    "ja": "操作を受け付けました。",
++    "en": "Operation accepted."
++  },
++  "error.ota.password": {
++    "ja": "先にOTAパスワードを設定してください。",
++    "en": "Set OTA password first."
++  },
++  "error.ota.token": {
++    "ja": "トークンが無効です。更新ページを開き直してください。",
++    "en": "Invalid token; reopen update page."
++  },
++  "error.ota.slot": {
++    "ja": "OTA領域がありません。Default 4MB OTA構成でUSBから導入してください。",
++    "en": "No OTA slot. Install by USB with Default 4MB OTA partitions."
++  }
++}
+--- v1.1/web_audio_scope.h
++++ v1.2/web_audio_scope.h
+@@ -1,4 +1,5 @@
+ #pragma once
++#include "ui_page.h"
+ #include <memory>
+ #include <new>
+ #include "audio_scope_page.h"
+@@ -6,7 +7,7 @@
+ static void setupAudioScopeRoutes(WebServer &s,AppConfig &cfg,AudioAdcCapture &audio){
+   s.on("/audio",HTTP_GET,[&s,&cfg](){
+     if(!logAuth(s,cfg))return;
+-    s.sendHeader("Cache-Control","no-store");s.send(200,"text/html; charset=utf-8",AUDIO_SCOPE_PAGE);
++    s.sendHeader("Cache-Control","no-store");sendUiPage(s,AUDIO_SCOPE_PAGE);
+   });
+   s.on("/audio/data",HTTP_GET,[&s,&cfg,&audio](){
+     if(!logAuth(s,cfg))return;
+--- v1.1/web_log.h
++++ v1.2/web_log.h
+@@ -1,12 +1,13 @@
+ #pragma once
++#include "ui_page.h"
+ static bool logAuth(WebServer &s,const AppConfig &cfg){
+   if(cfg.otaPassword.length()>=8&&!s.authenticate("admin",cfg.otaPassword.c_str())){s.requestAuthentication();return false;}return true;
+ }
+ static void setupLogRoutes(WebServer &s,AppConfig &cfg){
+   s.on("/logs",HTTP_GET,[&s,&cfg](){if(!logAuth(s,cfg))return;
+-    String page=R"HTML(<!doctype html><html lang='ja'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>本体ログ</title><style>body{font-family:system-ui;max-width:1000px;margin:24px auto;padding:0 14px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f5f7;padding:12px}button{padding:8px;margin:5px}</style><h1>本体ログ</h1><p>最大4KB / 古い行から上書き / NTP同期後はJST日時と経過時間、同期前はUNSYNC表示。RAMログは再起動・電源断で消えます。</p><button onclick='load()'>更新</button><a href='/logs.txt?download=1'>ダウンロード</a><button onclick='clearLog()'>ログ消去</button><a href='/'>管理画面へ戻る</a><pre id='log'>読み込み中...</pre><script>async function load(){try{const r=await fetch('/logs.txt',{cache:'no-store'});if(!r.ok)throw Error(r.status);document.getElementById('log').textContent=await r.text();}catch(e){document.getElementById('log').textContent='ログ取得失敗: '+e.message;}}async function clearLog(){if(!confirm('ログを消去しますか？'))return;const r=await fetch('/logs/clear?token=)HTML";
+-    page+=otaToken;page+=R"HTML(',{method:'POST'});if(!r.ok){alert('消去失敗: '+r.status);return;}load();}load();</script></html>)HTML";
+-    s.sendHeader("Cache-Control","no-store");s.send(200,"text/html; charset=utf-8",page);
++    String page=R"HTML(<!doctype html><html lang='ja'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{{logs.title}}</title><style>body{font-family:system-ui;max-width:1000px;margin:24px auto;padding:0 14px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f5f7;padding:12px}button{padding:8px;margin:5px}</style><h1>{{logs.title}}</h1><p>{{logs.hint}}</p><button onclick='load()'>{{logs.refresh}}</button><a href='/logs.txt?download=1'>{{logs.download}}</a><button onclick='clearLog()'>{{logs.clear}}</button><a href='/'>{{logs.back}}</a><pre id='log'>{{logs.loading}}</pre><script>async function load(){try{const r=await fetch('/logs.txt',{cache:'no-store'});if(!r.ok)throw Error(r.status);document.getElementById('log').textContent=await r.text();}catch(e){document.getElementById('log').textContent='{{logs.failure}}'+e.message;}}async function clearLog(){if(!confirm('{{logs.confirm}}'))return;const r=await fetch('/logs/clear?token=)HTML";
++    page+=otaToken;page+=R"HTML(',{method:'POST'});if(!r.ok){alert('{{logs.clearfail}}'+r.status);return;}load();}load();</script></html>)HTML";
++    s.sendHeader("Cache-Control","no-store");sendUiPage(s,page);
+   });
+   s.on("/logs.txt",HTTP_GET,[&s,&cfg](){if(!logAuth(s,cfg))return;s.sendHeader("Cache-Control","no-store");if(s.arg("download")=="1")s.sendHeader("Content-Disposition","attachment; filename=igate-log.txt");s.send(200,"text/plain; charset=utf-8",appLog.snapshot());});
+   s.on("/logs/clear",HTTP_POST,[&s,&cfg](){if(!logAuth(s,cfg))return;if(s.arg("token")!=otaToken){s.send(403,"text/plain","Invalid token");return;}appLog.clear();appLog.printf("[LOG] cleared by administrator");s.send(200,"text/plain","OK");});
+--- v1.1/web_ota.h
++++ v1.2/web_ota.h
+@@ -1,4 +1,5 @@
+ #pragma once
++#include "ui_page.h"
+ #include <Update.h>
+ #include <esp_ota_ops.h>
+ #include <esp_system.h>
+@@ -69,9 +70,9 @@
+   if(otaBusy && !otaSuccess && uint32_t(now-otaActivity)>OTA_IDLE_MS)abortOta("No received chunk for 10 min; upload aborted");
+ }
+ static bool otaAuth(WebServer &s,const AppConfig &cfg,bool token){
+-  if(cfg.otaPassword.length()<8){s.send(403,"text/plain","Set OTA password first.");return false;}
++  if(cfg.otaPassword.length()<8){s.send(403,"text/plain",uiText("error.ota.password",uiEnglish(s)));return false;}
+   if(!s.authenticate("admin",cfg.otaPassword.c_str())){s.requestAuthentication();return false;}
+-  if(token && s.arg("token")!=otaToken){s.send(403,"text/plain","Invalid token; reopen update page.");return false;}
++  if(token && s.arg("token")!=otaToken){s.send(403,"text/plain",uiText("error.ota.token",uiEnglish(s)));return false;}
+   return true;
+ }
+ static String otaQuoted(const String &input){
+@@ -106,9 +107,9 @@
+   s.on("/update",HTTP_GET,[&s,&cfg](){
+     if(!otaAuth(s,cfg,false))return;
+     const esp_partition_t *part=esp_ota_get_next_update_partition(nullptr);
+-    if(!part){s.send(409,"text/plain","No OTA slot. Install by USB with Default 4MB OTA partitions.");return;}
++    if(!part){s.send(409,"text/plain",uiText("error.ota.slot",uiEnglish(s)));return;}
+     String page=otaUpdatePage(otaToken);
+-    s.sendHeader("Cache-Control","no-store");s.send(200,"text/html; charset=utf-8",page);
++    s.sendHeader("Cache-Control","no-store");sendUiPage(s,page);
+   });
+   s.on("/update/begin",HTTP_POST,[&s,&cfg](){
+     if(!otaAuth(s,cfg,true))return;
+--- v1.1/web_rf_settings.h
++++ v1.2/web_rf_settings.h
+@@ -1,14 +1,14 @@
+ #pragma once
+-
+ #include "settings.h"
+-
+ static String makeRfFrequencySelect(const AppConfig &cfg) {
+-  String page = F("<label>受信周波数<select name='rxfreq' style='width:100%;padding:8px;font-size:16px'>");
+-  page += F("<option value='144.6600'");
+-  if (cfg.rxFrequency == "144.6600") page += F(" selected");
+-  page += F(">144.660 MHz（初期値）</option><option value='144.6400'");
+-  if (cfg.rxFrequency == "144.6400") page += F(" selected");
+-  page += F(">144.640 MHz</option></select></label>");
+-  page += F("<p class='small'>復調方式はどちらの周波数でも1200bps AFSKです。国内では一般に144.660MHzが1200bps、144.640MHzが9600bps用です。本機は9600bpsの復調には対応していません。変更はSave &amp; Reboot後に反映します。</p>");
++  String page = F("<label>{{rf.title}}<select name='rxfreq' style='width:100%;padding:8px;font-size:16px'>");
++  for (const auto &channel : RF_CHANNELS) {
++    page += F("<option value='"); page += channel.frequency; page += '\'';
++    if (cfg.rxFrequency == channel.frequency) page += F(" selected");
++    page += '>'; page += channel.label;
++    if (String(channel.frequency) == DEFAULT_DRA_RX_FREQ) page += F(" ({{rf.default}})");
++    page += F("</option>");
++  }
++  page += F("</select></label><p class='small'>{{rf.note}}</p>");
+   return page;
+ }
+--- v1.1/web_rx_diagnostics.h
++++ v1.2/web_rx_diagnostics.h
+@@ -1,13 +1,14 @@
+ #pragma once
++#include "ui_page.h"
+ #include <memory>
+ #include <new>
+ 
+ static void setupRxDiagnosticRoutes(WebServer &s,AppConfig &cfg,AudioAdcCapture &audio){
+   s.on("/rxdiag",HTTP_GET,[&s,&cfg](){
+     if(!logAuth(s,cfg))return;
+-    String page=R"HTML(<!doctype html><html lang='ja'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>受信変化の記録</title><style>body{font-family:system-ui;margin:20px}pre{white-space:pre;overflow:auto;background:#f2f5f7;padding:10px}button{margin:5px;padding:8px}</style><h1>受信変化の記録 v1.1</h1><p>音声・トーン・ADC・復調カウンターの怪しい変化を記録します。APRS受信の確定判定ではありません。最大4件、古いイベントから上書き。再起動・電源断で消えます。</p><p>約20msごと / 直前最大8行＋変化後、合計最大48行（約0.96秒）。トーンは各区間末尾の値、RMSは平滑電力の区間平均です。通信処理の遅れに左右されずADCタスクで記録します。</p><p>送信後は「記録停止」で保持してからダウンロードしてください。待機時の雑音でも反応するため、記録が流れる場合があります。「手動記録」は次の区間から記録を開始します。</p><button onclick="action('freeze')">記録停止</button><button onclick="action('resume')">記録再開</button><button onclick="action('manual')">手動記録</button><button onclick="action('clear')">記録消去・再開</button><button onclick='load()'>表示更新</button><a href='/rxdiag.csv?download=1'>CSVダウンロード</a> / <a href='/logs'>本体ログ</a> / <a href='/'>管理画面へ戻る</a><p id='result'></p><p>reason（ビット合計）: 1=RMS上下変化、2=トーン合計変化、4=トーン比変化、8=ADC端付近、16=CRC増加、32=正常フレーム、64=フレーム/DMA/読取異常、128=手動。trigger=1の行が開始点。adc_valid=0は有効なADCデータがない行です。差分カウンターは前の記録区間からの増分です。</p><pre id='data'>読み込み中...</pre><script>async function load(){try{const r=await fetch('/rxdiag.csv',{cache:'no-store'});if(!r.ok)throw Error(r.status);document.getElementById('data').textContent=await r.text();}catch(e){document.getElementById('data').textContent='取得失敗: '+e.message;}}async function action(a){if(a==='clear'&&!confirm('診断記録を消去して再開しますか？'))return;try{const r=await fetch('/rxdiag/control?token=)HTML";
+-    page+=otaToken;page+=R"HTML(&action='+a,{method:'POST'});if(!r.ok)throw Error(r.status);document.getElementById('result').textContent=await r.text();load();}catch(e){document.getElementById('result').textContent='操作失敗: '+e.message;}}load();</script></html>)HTML";
+-    s.sendHeader("Cache-Control","no-store");s.send(200,"text/html; charset=utf-8",page);
++    String page=R"HTML(<!doctype html><html lang='ja'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{{rx.title}}</title><style>body{font-family:system-ui;margin:20px}pre{white-space:pre;overflow:auto;background:#f2f5f7;padding:10px}button{margin:5px;padding:8px}</style><h1>{{rx.title}} v1.2</h1><p>{{rx.hint}}</p><p>{{rx.window}}</p><p>{{rx.holdhint}}</p><button onclick="action('freeze')">{{rx.freeze}}</button><button onclick="action('resume')">{{rx.resume}}</button><button onclick="action('manual')">{{rx.manual}}</button><button onclick="action('clear')">{{rx.clear}}</button><button onclick='load()'>{{rx.refresh}}</button><a href='/rxdiag.csv?download=1'>{{rx.csv}}</a> / <a href='/logs'>{{rx.log}}</a> / <a href='/'>{{rx.back}}</a><p id='result'></p><p>{{rx.reason}}</p><pre id='data'>{{rx.loading}}</pre><script>async function load(){try{const r=await fetch('/rxdiag.csv',{cache:'no-store'});if(!r.ok)throw Error(r.status);document.getElementById('data').textContent=await r.text();}catch(e){document.getElementById('data').textContent='{{rx.fetchfail}}'+e.message;}}async function action(a){if(a==='clear'&&!confirm('{{rx.confirm}}'))return;try{const r=await fetch('/rxdiag/control?token=)HTML";
++    page+=otaToken;page+=R"HTML(&lang={{lang}}&action='+a,{method:'POST'});if(!r.ok)throw Error(r.status);document.getElementById('result').textContent=await r.text();load();}catch(e){document.getElementById('result').textContent='{{rx.opfail}}'+e.message;}}load();</script></html>)HTML";
++    s.sendHeader("Cache-Control","no-store");sendUiPage(s,page);
+   });
+   s.on("/rxdiag/control",HTTP_POST,[&s,&cfg,&audio](){
+     if(!logAuth(s,cfg))return;
+@@ -17,7 +18,7 @@
+     if(a=="freeze")n=0;else if(a=="resume")n=1;else if(a=="clear")n=2;else if(a=="manual")n=3;
+     else{s.send(400,"text/plain","Unknown action");return;}
+     audio.controlDiagnostics(n);appLog.printf("[RXDIAG] action=%s",a.c_str());
+-    s.send(200,"text/plain; charset=utf-8",n==0?"記録停止。保存した記録は保持されています。":"操作を受け付けました。");
++    s.send(200,"text/plain; charset=utf-8",uiText(n==0?"rx.frozen":"rx.accepted",uiEnglish(s)));
+   });
+   s.on("/rxdiag.csv",HTTP_GET,[&s,&cfg,&audio](){
+     if(!logAuth(s,cfg))return;
+@@ -26,10 +27,10 @@
+     if(!copy){s.send(503,"text/plain","Not enough free heap for diagnostic snapshot");return;}
+     audio.copyDiagnostics(*copy);
+     s.sendHeader("Cache-Control","no-store");
+-    if(s.arg("download")=="1")s.sendHeader("Content-Disposition","attachment; filename=igate-rx-v012.csv");
++    if(s.arg("download")=="1")s.sendHeader("Content-Disposition","attachment; filename=igate-rx-v1_2.csv");
+     s.setContentLength(CONTENT_LENGTH_UNKNOWN);s.send(200,"text/plain; charset=utf-8","");
+     char line[512],date[90];
+-    snprintf(line,sizeof(line),"# v1.1 frozen=%u total=%lu overwritten=%lu storage=%u bytes; rows are ~20ms, not raw audio\n",copy->frozen,(unsigned long)copy->total,(unsigned long)copy->overwritten,unsigned(sizeof(RxDiagnostics)));
++    snprintf(line,sizeof(line),"# v1.2 frozen=%u total=%lu overwritten=%lu storage=%u bytes; rows are ~20ms, not raw audio\n",copy->frozen,(unsigned long)copy->total,(unsigned long)copy->overwritten,unsigned(sizeof(RxDiagnostics)));
+     s.sendContent(line);
+     s.sendContent("event,reason,complete,row,trigger,time,uptime_ms,unix_ms,rms,mark1200,space2200,adc_min,adc_max,samples,crc_bad,good,frame_errors,overflows,read_errors,timeouts,delta_crc,delta_good,delta_frame_errors,delta_overflow,delta_read_errors,delta_timeouts,adc_valid\n");
+     unsigned first=copy->total>RxDiagnostics::EVENTS?copy->total-RxDiagnostics::EVENTS:0;

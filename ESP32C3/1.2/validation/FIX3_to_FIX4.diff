@@ -1,0 +1,164 @@
+--- baseline/config.h
++++ fix4/config.h
+@@ -8,7 +8,7 @@
+ // -----------------------------------------------------------------------------
+ 
+ #define FW_NAME       "APRS-iGate-C3"
+-#define FW_VERSION    "0.1 FIX3"
++#define FW_VERSION    "0.1 FIX4"
+ 
+ // FIX3: ADC continuous DMA re-enabled for live AFSK receive.
+ // To isolate an ADC-related crash, temporarily set this to 1.
+--- baseline/afsk1200.h
++++ fix4/afsk1200.h
+@@ -114,7 +114,9 @@
+     }
+   }
+ 
+-  float rms() const { return _rms; }
++  float rms() const { return sqrtf(_rms); } // true normalized RMS (previously mean square)
++  float markLevel() const { return sqrtf(_mi * _mi + _mq * _mq); }
++  float spaceLevel() const { return sqrtf(_si * _si + _sq * _sq); }
+   uint32_t framesGood() const { return _framesGood; }
+   uint32_t crcBad() const { return _crcBad; }
+   uint32_t frameErrors() const { return _frameErrors; }
+--- baseline/audio_adc.h
++++ fix4/audio_adc.h
+@@ -7,9 +7,27 @@
+ #include "hal/adc_types.h"
+ #include "soc/soc_caps.h"
+ 
++struct AfMonitorSnapshot {
++  uint16_t adcMin = 0;
++  uint16_t adcMax = 0;
++  float rms = 0;
++  float peak5s = 0;
++  float mark1200 = 0;
++  float space2200 = 0;
++  uint32_t sampleCount = 0;
++};
++
+ class AudioAdcCapture {
+ public:
+   explicit AudioAdcCapture(Afsk1200Decoder &decoder) : _decoder(decoder) {}
++
++  AfMonitorSnapshot monitor() {
++    AfMonitorSnapshot copy;
++    portENTER_CRITICAL(&_monitorMux);
++    copy = _monitor;
++    portEXIT_CRITICAL(&_monitorMux);
++    return copy;
++  }
+ 
+   bool begin() {
+ #if !defined(CONFIG_IDF_TARGET_ESP32C3)
+@@ -77,6 +95,47 @@
+   Afsk1200Decoder &_decoder;
+   adc_continuous_handle_t _handle = nullptr;
+   TaskHandle_t _task = nullptr;
++  portMUX_TYPE _monitorMux = portMUX_INITIALIZER_UNLOCKED;
++  AfMonitorSnapshot _monitor{};
++  float _peakBins[20]{}; // 20 x 250 ms = 5 seconds
++  uint8_t _peakPos = 0;
++  uint32_t _windowSamples = 0;
++  uint16_t _windowMin = 4095;
++  uint16_t _windowMax = 0;
++  float _windowPeak = 0;
++  float _windowMark = 0;
++  float _windowSpace = 0;
++  uint32_t _totalSamples = 0;
++
++  void observe(uint16_t raw) {
++    if (raw < _windowMin) _windowMin = raw;
++    if (raw > _windowMax) _windowMax = raw;
++    const float r = _decoder.rms();
++    if (r > _windowPeak) _windowPeak = r;
++    _windowMark = _decoder.markLevel();
++    _windowSpace = _decoder.spaceLevel();
++    ++_windowSamples;
++    ++_totalSamples;
++    if (_windowSamples >= AFSK_SAMPLE_RATE / 4) {
++      _peakBins[_peakPos] = _windowPeak;
++      _peakPos = (_peakPos + 1) % 20;
++      float peak = 0;
++      for (float v : _peakBins) if (v > peak) peak = v;
++      portENTER_CRITICAL(&_monitorMux);
++      _monitor.adcMin = _windowMin;
++      _monitor.adcMax = _windowMax;
++      _monitor.rms = r;
++      _monitor.peak5s = peak;
++      _monitor.mark1200 = _windowMark;
++      _monitor.space2200 = _windowSpace;
++      _monitor.sampleCount = _totalSamples;
++      portEXIT_CRITICAL(&_monitorMux);
++      _windowSamples = 0;
++      _windowMin = 4095;
++      _windowMax = 0;
++      _windowPeak = 0;
++    }
++  }
+ 
+   static void taskThunk(void *arg) {
+     static_cast<AudioAdcCapture *>(arg)->taskLoop();
+@@ -92,7 +151,9 @@
+         for (uint32_t i = 0; i + SOC_ADC_DIGI_RESULT_BYTES <= outLen; i += SOC_ADC_DIGI_RESULT_BYTES) {
+           const adc_digi_output_data_t *p = reinterpret_cast<const adc_digi_output_data_t *>(&buffer[i]);
+           if (p->type2.channel == ADC_CHANNEL_3 && p->type2.unit == 0) {
+-            _decoder.processRaw(static_cast<uint16_t>(p->type2.data));
++            const uint16_t raw = static_cast<uint16_t>(p->type2.data);
++            _decoder.processRaw(raw);
++            observe(raw);
+           }
+         }
+       } else if (err != ESP_ERR_TIMEOUT) {
+--- baseline/APRS_iGate_C3_Rev0_1.ino
++++ fix4/APRS_iGate_C3_Rev0_1.ino
+@@ -227,7 +227,7 @@
+   page.reserve(7000);
+   page += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+   page += F("<title>APRS iGate</title><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 14px;color:#222}h1{font-size:1.5rem}fieldset{margin:14px 0;padding:14px;border:1px solid #ccc;border-radius:8px}label{display:block;margin:9px 0}input{width:100%;box-sizing:border-box;padding:8px;font-size:16px}button{padding:10px 14px;margin:5px 5px 5px 0}.badge{display:inline-block;padding:3px 8px;border-radius:999px;margin:2px}.ok{background:#d9f5df}.ng{background:#f7d9d9}.mono{font-family:monospace;word-break:break-all}.small{font-size:.9rem;color:#555}</style></head><body>");
+-  page += F("<h1>APRS iGate ESP32C3 Rev0.1</h1>");
++  page += F("<h1>APRS iGate ESP32C3 Rev0.1 FIX4</h1>");
+   page += statusBadge(String("Wi-Fi ") + (wifiOk ? "OK" : "NG"), wifiOk);
+   page += statusBadge(String("DRA818V ") + (draReady ? "OK" : "NG"), draReady);
+   page += statusBadge(String("ADC ") + (adcReady ? "OK" : "NG"), adcReady);
+@@ -243,8 +243,12 @@
+   page += F(" &nbsp; <b>Dup:</b> "); page += duplicateCount;
+   page += F(" &nbsp; <b>Blocked:</b> "); page += blockedCount;
+   page += F(" &nbsp; <b>CRC bad:</b> "); page += afsk.crcBad();
+-  page += F(" &nbsp; <b>AF RMS:</b> "); page += String(afsk.rms(), 5);
+-  page += F("</p><p class='mono'><b>Last RX:</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
++  page += F(" &nbsp; <b>AF RMS:</b> "); page += String(audio.monitor().rms, 5);
++  page += F("</p><fieldset><legend>AFSK receive monitor (auto-update 1 s)</legend>");
++  page += F("<div class='mono' id='afdiag'>Loading monitor...</div>");
++  page += F("<p class='small'>ADC Min/Max are raw codes in the last 250 ms window. Mark/Space are detector magnitudes, not calibrated dB. Peak holds the maximum RMS over approximately 5 s.</p></fieldset>");
++  page += F("<script>async function refreshAF(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json();const f=x=>Number(x||0).toFixed(5);document.getElementById('afdiag').textContent='AF RMS: '+f(s.af_rms)+' | Peak 5s: '+f(s.af_peak5s)+' | ADC Min/Max: '+s.adc_min+'/'+s.adc_max+' | 1200Hz: '+f(s.mark1200)+' | 2200Hz: '+f(s.space2200)+' | CRC bad: '+s.crc_bad+' | Decoded: '+s.decoded+' | Samples: '+s.samples;}catch(e){document.getElementById('afdiag').textContent='Monitor unavailable: '+e.message;}}refreshAF();setInterval(refreshAF,1000);</script>");
++  page += F("<p class='mono'><b>Last RX:</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
+ 
+   page += F("<form method='post' action='/save'><fieldset><legend>Wi-Fi / APRS-IS</legend>");
+   page += F("<label>Wi-Fi SSID<input name='ssid' value='"); page += htmlEscape(config.wifiSsid); page += F("'></label>");
+@@ -277,7 +281,14 @@
+     j += ",\"decoded\":"; j += String(rxPacketCount);
+     j += ",\"gated\":"; j += String(gatedPacketCount);
+     j += ",\"crc_bad\":"; j += String(afsk.crcBad());
+-    j += ",\"af_rms\":"; j += String(afsk.rms(), 6);
++    const AfMonitorSnapshot m = audio.monitor();
++    j += ",\"af_rms\":"; j += String(m.rms, 6);
++    j += ",\"af_peak5s\":"; j += String(m.peak5s, 6);
++    j += ",\"adc_min\":"; j += String(m.adcMin);
++    j += ",\"adc_max\":"; j += String(m.adcMax);
++    j += ",\"mark1200\":"; j += String(m.mark1200, 6);
++    j += ",\"space2200\":"; j += String(m.space2200, 6);
++    j += ",\"samples\":"; j += String(m.sampleCount);
+     j += "}";
+     web.send(200, "application/json", j);
+   });
+@@ -489,7 +500,7 @@
+ void setup() {
+   DBG_BEGIN();
+   delay(100);
+-  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.1");
++  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.1 FIX4");
+ 
+   pinMode(PIN_LED_WIFI, OUTPUT);
+   pinMode(PIN_LED_APRS, OUTPUT);

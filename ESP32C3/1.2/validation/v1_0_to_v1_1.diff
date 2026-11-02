@@ -1,0 +1,227 @@
+--- v1.0/config.h
++++ v1.1/config.h
+@@ -3,12 +3,12 @@
+ #include <Arduino.h>
+ 
+ // -----------------------------------------------------------------------------
+-// APRS iGate firmware v1.0 - fixed hardware definition for Rev0.1 PCB
++// APRS iGate firmware v1.1 - fixed hardware definition for Rev0.1 PCB
+ // Target: Seeed Studio XIAO ESP32C3 + DRA818V (RX only)
+ // -----------------------------------------------------------------------------
+ 
+ #define FW_NAME       "APRS-iGate-C3"
+-#define FW_VERSION    "1.0"
++#define FW_VERSION    "1.1"
+ 
+ // FIX3: ADC continuous DMA re-enabled for live AFSK receive.
+ // To isolate an ADC-related crash, temporarily set this to 1.
+@@ -25,10 +25,9 @@
+ static constexpr uint8_t PIN_SETUP_SW    = 10;  // D10 / GPIO10, switch to GND
+ 
+ // Japan APRS 1200bps AFSK: 144.660 MHz. 144.640 MHz is generally 9600bps.
+-// Fixed receive channel; TX frequency is only a required module setup field.
+-static constexpr const char *DRA_RX_FREQ = "144.6600";
+-static constexpr const char *DRA_TX_FREQ = "144.6600"; // PTT is hard-wired RX, never keyed by firmware
+-static constexpr const char *DRA_RX_LABEL = "144.660"; // LCD/Web/boot label
++// Web/NVS selects 144.6400 or 144.6600 MHz; default 144.6600.
++// TX field follows selected RX frequency; PTT is fixed to RX by hardware.
++static constexpr const char *DEFAULT_DRA_RX_FREQ = "144.6600";
+ static constexpr uint8_t DRA_SQL         = 0;           // Monitor mode: avoid clipping packet edges
+ static constexpr uint8_t DRA_VOLUME      = 5;
+ 
+--- v1.0/settings.h
++++ v1.1/settings.h
+@@ -5,6 +5,7 @@
+ #include "config.h"
+ 
+ struct AppConfig {
++  String rxFrequency = DEFAULT_DRA_RX_FREQ;
+   String wifiSsid;
+   String wifiPass;
+   String callsign;
+@@ -24,6 +25,7 @@
+   bool load(AppConfig &cfg) {
+     Preferences p;
+     if (!p.begin("igate", true)) return false;
++    cfg.rxFrequency  = p.getString("rx_freq", DEFAULT_DRA_RX_FREQ);
+     cfg.wifiSsid     = p.getString("ssid", "");
+     cfg.wifiPass     = p.getString("wpass", "");
+     cfg.callsign     = p.getString("call", "");
+@@ -45,6 +47,7 @@
+     normalize(cfg);
+     Preferences p;
+     if (!p.begin("igate", false)) return false;
++    p.putString("rx_freq", cfg.rxFrequency);
+     p.putString("ssid", cfg.wifiSsid);
+     p.putString("wpass", cfg.wifiPass);
+     p.putString("call", cfg.callsign);
+@@ -67,6 +70,14 @@
+       p.clear();
+       p.end();
+     }
++  }
++
++  static bool validRxFrequency(const String &frequency) {
++    return frequency == "144.6600" || frequency == "144.6400";
++  }
++
++  static String rxFrequencyLabel(const AppConfig &cfg) {
++    return cfg.rxFrequency.substring(0, 7);
+   }
+ 
+   static bool validForStation(const AppConfig &cfg) {
+@@ -95,6 +106,8 @@
+   }
+ 
+   static void normalize(AppConfig &cfg) {
++    cfg.rxFrequency.trim();
++    if (!validRxFrequency(cfg.rxFrequency)) cfg.rxFrequency = DEFAULT_DRA_RX_FREQ;
+     cfg.wifiSsid.trim();
+     cfg.callsign.trim();
+     cfg.callsign.toUpperCase();
+--- v1.0/dra818v.h
++++ v1.1/dra818v.h
+@@ -7,7 +7,7 @@
+ public:
+   DRA818VController(HardwareSerial &port) : _port(port) {}
+ 
+-  bool begin() {
++  bool begin(const char *rxFrequency) {
+     _port.begin(9600, SERIAL_8N1, PIN_DRA_RX, PIN_DRA_TX);
+     delay(200);
+ 
+@@ -26,7 +26,7 @@
+       return false;
+     }
+ 
+-    String group = String("AT+DMOSETGROUP=0,") + DRA_TX_FREQ + "," + DRA_RX_FREQ + ",0000," + String(DRA_SQL) + ",0000";
++    String group = String("AT+DMOSETGROUP=0,") + rxFrequency + "," + rxFrequency + ",0000," + String(DRA_SQL) + ",0000";
+     DBG_PRINTF("DRA group request: %s\n", group.c_str());
+     String r1 = command(group, 900);
+     DBG_PRINTF("DRA group: %s\n", r1.c_str());
+--- v1.0/APRS_iGate_C3_Rev1_0.ino
++++ v1.1/APRS_iGate_C3_Rev1_1.ino
+@@ -7,6 +7,7 @@
+ 
+ #include "config.h"
+ #include "settings.h"
++#include "web_rf_settings.h"
+ #include "lcd1602_pcf8574.h"
+ #include "dra818v.h"
+ #include "afsk1200.h"
+@@ -288,7 +289,7 @@
+   page.reserve(9000);
+   page += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+   page += F("<title>APRS iGate</title><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 14px;color:#222}h1{font-size:1.5rem}fieldset{margin:14px 0;padding:14px;border:1px solid #ccc;border-radius:8px}label{display:block;margin:9px 0}input{width:100%;box-sizing:border-box;padding:8px;font-size:16px}button{padding:10px 14px;margin:5px 5px 5px 0}.badge{display:inline-block;padding:3px 8px;border-radius:999px;margin:2px}.ok{background:#d9f5df}.ng{background:#f7d9d9}.mono{font-family:monospace;word-break:break-all}.small{font-size:.9rem;color:#555}</style></head><body>");
+-  page += F("<h1>APRS iGate ESP32C3 Rev1.0</h1>");
++  page += F("<h1>APRS iGate ESP32C3 Rev1.1</h1>");
+   page += statusBadge(String("Wi-Fi ") + (wifiOk ? "OK" : "NG"), wifiOk);
+   page += statusBadge(String("DRA818V ") + (draReady ? "OK" : "NG"), draReady);
+   page += F("<span id='adcstate'>");
+@@ -296,7 +297,7 @@
+   page += F("</span>");
+   page += statusBadge(String("APRS-IS ") + (aprs.verified() ? "VERIFIED" : (aprs.connected() ? "UNVERIFIED" : "OFF")), aprs.verified());
+   page += F("<p><b>RF:</b> ");
+-  page += DRA_RX_LABEL;
++  page += SettingsStore::rxFrequencyLabel(config);
+   page += F(" MHz / 1200 bps AFSK / RX only / qAO</p>");
+   page += F("<p><b>IP:</b> ");
+   page += wifiOk ? WiFi.localIP().toString() : String("-");
+@@ -316,6 +317,7 @@
+   page += F("<p class='mono'><b>Last RX:</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
+ 
+   page += F("<form method='post' action='/save'><fieldset><legend>Wi-Fi / APRS-IS</legend>");
++  page += makeRfFrequencySelect(config);
+   page += F("<label>Wi-Fi SSID<input name='ssid' value='"); page += htmlEscape(config.wifiSsid); page += F("'></label>");
+   page += F("<label>Wi-Fi Password<input type='password' name='wpass' placeholder='blank = keep current'></label>");
+   page += F("<label>iGate Callsign-SSID<input name='call' maxlength='9' value='"); page += htmlEscape(config.callsign); page += F("'></label>");
+@@ -355,6 +357,7 @@
+ 
+   web.on("/status", HTTP_GET, []() {
+     String j = "{\"firmware\":\""; j += FW_VERSION; j += "\",";
++    j += "\"rf_mhz\":\""; j += SettingsStore::rxFrequencyLabel(config); j += "\",\"afsk_baud\":"; j += AFSK_BAUD; j += ",";
+     j += "\"heap\":"; j += ESP.getFreeHeap();
+     j += ",\"ntp_synced\":"; j += deviceClock.generation()?"true":"false";
+     j += ",\"clock\":\""; j += clockStatus(); j += "\"";
+@@ -412,6 +415,13 @@
+     if (otaBusy) { web.send(409,"text/plain","OTA in progress. Finish or cancel it first."); return; }
+     if (config.otaPassword.length() >= 8 && !web.authenticate("admin", config.otaPassword.c_str())) { web.requestAuthentication(); return; }
+     AppConfig next = config;
++    if (web.hasArg("rxfreq")) {
++      const String requestedFrequency = web.arg("rxfreq");
++      if (!SettingsStore::validRxFrequency(requestedFrequency)) {
++        web.send(400, "text/plain; charset=utf-8", "受信周波数は144.640または144.660MHzを選択してください。"); return;
++      }
++      next.rxFrequency = requestedFrequency;
++    }
+     next.wifiSsid = web.arg("ssid");
+     if (web.arg("wpass").length()) next.wifiPass = web.arg("wpass");
+     next.callsign = web.arg("call");
+@@ -598,12 +608,12 @@
+   }
+ 
+   if (lcdPage == 0) {
+-    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 1.0";
++    String l1 = config.callsign.length() ? config.callsign + " iGate" : "APRS iGate 1.1";
+     String l2 = String("W:") + (WiFi.status() == WL_CONNECTED ? "OK" : "--") + " IS:" + (aprs.verified() ? "OK" : "--");
+     lcd.printLine(0, l1);
+     lcd.printLine(1, l2);
+   } else if (lcdPage == 1) {
+-    lcd.printLine(0, String(DRA_RX_LABEL) + " RX ONLY");
++    lcd.printLine(0, SettingsStore::rxFrequencyLabel(config) + " RX ONLY");
+     lcd.printLine(1, String("RX ") + lastRxCall);
+   } else {
+     char b[17];
+@@ -650,7 +660,7 @@
+   DBG_BEGIN();
+   delay(100);
+   logOtaBoot();
+-  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev1.0");
++  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev1.1");
+   DBG_PRINTF("[BOOT] IDF=%s tick_hz=%u setup_priority=%u heap=%u\n",
+     ESP.getSdkVersion(), (unsigned)configTICK_RATE_HZ,
+     (unsigned)uxTaskPriorityGet(nullptr), ESP.getFreeHeap());
+@@ -672,14 +682,14 @@
+   DBG_PRINTF("[BOOT] LCD result=%d\n", lcdPresent);
+   if (lcdPresent) {
+     lcd.setBacklight(true);
+-    lcd.printLine(0, "APRS iGate 1.0");
++    lcd.printLine(0, "APRS iGate 1.1");
+     lcd.printLine(1, "Booting...");
+     lcdOnUntil = millis() + LCD_ON_MS;
+   }
+ 
+-  DBG_PRINTF("[BOOT] RF RX=%s MHz baud=%u Bell202 AFSK / RX only\n", DRA_RX_FREQ, (unsigned)AFSK_BAUD);
++  DBG_PRINTF("[BOOT] RF RX=%s MHz baud=%u Bell202 AFSK / RX only\n", config.rxFrequency.c_str(), (unsigned)AFSK_BAUD);
+   DBG_PRINTLN("[BOOT] DRA begin");
+-  draReady = dra.begin();
++  draReady = dra.begin(config.rxFrequency.c_str());
+   lastDraAttempt = millis();
+   DBG_PRINTF("[BOOT] DRA result=%d\n", draReady);
+ 
+@@ -749,7 +759,7 @@
+ 
+   if (!draReady && millis() - lastDraAttempt > 30000UL) {
+     lastDraAttempt = millis();
+-    draReady = dra.begin();
++    draReady = dra.begin(config.rxFrequency.c_str());
+   }
+ 
+   serviceLeds();
+--- /dev/null
++++ v1.1/web_rf_settings.h
+@@ -0,0 +1,14 @@
++#pragma once
++
++#include "settings.h"
++
++static String makeRfFrequencySelect(const AppConfig &cfg) {
++  String page = F("<label>受信周波数<select name='rxfreq' style='width:100%;padding:8px;font-size:16px'>");
++  page += F("<option value='144.6600'");
++  if (cfg.rxFrequency == "144.6600") page += F(" selected");
++  page += F(">144.660 MHz（初期値）</option><option value='144.6400'");
++  if (cfg.rxFrequency == "144.6400") page += F(" selected");
++  page += F(">144.640 MHz</option></select></label>");
++  page += F("<p class='small'>復調方式はどちらの周波数でも1200bps AFSKです。国内では一般に144.660MHzが1200bps、144.640MHzが9600bps用です。本機は9600bpsの復調には対応していません。変更はSave &amp; Reboot後に反映します。</p>");
++  return page;
++}

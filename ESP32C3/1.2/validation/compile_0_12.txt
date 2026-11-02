@@ -1,0 +1,9 @@
+Downloading index: package_index.tar.bz2 Get "https://downloads.arduino.cc/packages/package_index.tar.bz2": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: Some indexes could not be updated.
+Error initializing instance: Loading index file: loading json index file /workspace/scratch/87c9f8083559/build_tools/data/package_index.json: open /workspace/scratch/87c9f8083559/build_tools/data/package_index.json: no such file or directory
+Error initializing instance: Error loading hardware platform: discovery builtin:serial-discovery not found
+Error initializing instance: Error loading hardware platform: discovery builtin:mdns-discovery not found
+Error initializing instance: Error loading hardware platform: discovery builtin:serial-discovery not found
+Error initializing instance: Error loading hardware platform: discovery builtin:mdns-discovery not found
+Sketch uses 1235523 bytes (94%) of program storage space. Maximum is 1310720 bytes.
+Global variables use 68668 bytes (20%) of dynamic memory, leaving 259012 bytes for local variables. Maximum is 327680 bytes.

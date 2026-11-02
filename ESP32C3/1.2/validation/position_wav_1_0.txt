@@ -1,0 +1,3 @@
+Firmware v1.0 decoder: gain=0.25 accepted=5 crc_bad=0
+Firmware v1.0 decoder: gain=1 accepted=5 crc_bad=0
+Firmware v1.0 decoder: gain=2 accepted=5 crc_bad=0

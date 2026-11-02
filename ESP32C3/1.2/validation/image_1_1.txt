@@ -1,0 +1,6 @@
+PASS: ESP32-C3 image/checksum/digest (esptool); OTA slot size.
+PASS: Rev1.1, both RF choices, NVS key, selector and 1200bps label embedded; Rev1.0 absent.
+PASS: exact tested audio monitor HTML/JS embedded.
+PASS: DSP/ADC/OTA/APRS/beacon/diagnostics/clock/logger implementation unchanged from v1.0.
+Application bytes: 1231056 / 1310720
+SHA256: 2fc22568befa07cc45b245c533386e539936bd48a8aa63c66cc89359d8955b59

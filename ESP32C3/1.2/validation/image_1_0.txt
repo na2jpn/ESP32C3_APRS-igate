@@ -1,0 +1,6 @@
+PASS: ESP32-C3 image, checksum and validation hash verified by esptool 5.3.1.
+PASS: Rev1.0 / 144.6600 / 144.660 / 1200 bps AFSK / boot RF log / DRA group request present.
+PASS: old RF setting/old LCD boot/Rev0.12 absent.
+PASS: complete final tested audio monitor HTML/JS exactly embedded.
+OTA application bytes: 1229536 / slot 1310720
+SHA256: c47f2506cf14c6a2aa2ff37470e51fec4f36245295b00d91914c40eaa2e89edf

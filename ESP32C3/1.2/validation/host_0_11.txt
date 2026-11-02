@@ -1,0 +1,14 @@
+PASS: diagnostics, FIX3 decoder equivalence, tone discrimination, peak hold, ADC failure cleanup, bounded scheduling, timeout/error counters, HDLC/FCS. Synthetic waveform frames FIX3=1 FIX5=1
+PASS: actual LED function/config; 4 complete cycles, all boundaries, disconnected/unverified indicators, RX blanking.
+PASS: actual LCD service, 15-minute cadence, 2 cycles of 3x4-second pages, manual/AP priority, millis rollover, absent display.
+PASS: RX baseline/up/down/tone/balance/clipping/counters/pre-post/ring/freeze/manual/ADC error; clock unsynced/JST/64-bit/correction; both weak gates vs FIX3. Diagnostic RAM=12984 bytes
+PASS: real OTA SHA256/session/idempotent begin/replayed chunks/offsets/auth/cancel/10min timeout/wrap/verification/RTC/JSON; existing log and position regressions.
+PASS: actual RX HTTP auth/token/control/OTA exclusion/CSV; actual NTP service starts once, sync callback/JST/logging.
+PASS: actual OTA UI SHA256 vectors; pre/post commit ACK loss, start/finish/reboot loss, retry/status/503, cancel, reload resume, wrong identity/offset/reset/auth/verify, bounded retry and >5min successful progress.
+PASS: actual OTA Wi-Fi reconnect service cadence/connected state/millis wrap; no mode reset or APRS connect in maintenance path.
+PASS: ADC ownership/maintenance, actual-data confirmation, retry cap, manual recovery, stop/flush/start failures, elapsed wrap, invalid ADC record
+PASS: production Wi-Fi continuous-outage timer, ADC freshness states, recovery HTTP auth/token/OTA/queue failures/unconfigured password
+PASS: audio scope lease/off/OTA/rollover, exact extrema/AC RMS/DC/clipping, no-gap stitching, actual ADC task integration. Fixed storage=2184 bytes
+PASS: real OTA SHA256/session/idempotent begin/replayed chunks/offsets/auth/cancel/10min timeout/wrap/verification/RTC/JSON; existing log and position regressions.
+PASS: audio monitor production HTTP auth/unconfigured/OTA/maintenance/invalid/fresh/stale/fault/recovering and bounded JSON frame
+PASS: exact audio UI meter/dBFS/scale, pause/freeze race, resume, no-overlap, retry/backoff, OTA, stale-data clearing, hidden/pagehide suspension

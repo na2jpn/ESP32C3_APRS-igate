@@ -1,0 +1,1 @@
+PASS: actual LED function/config; 4 complete cycles, all boundaries, disconnected/unverified indicators, RX blanking.

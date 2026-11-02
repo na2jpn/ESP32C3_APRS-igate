@@ -1,0 +1,7 @@
+Application: APRS_iGate_C3_Rev1_2.ino.bin
+Size: 1254432 / 1310720 bytes
+SHA256: df854d308ff16f49f4b1ec42f4d543c1191ddc375bd7157ac3b53382b4c79fb9
+PASS: audio_scope_page.h: all 1 exact generated string(s) present
+PASS: ota_page.h: all 2 exact generated string(s) present
+PASS: Version, all eight canonical frequencies, English/Japanese UI text present; old LCD 1.1 absent
+PASS: 201 translation entries in source; 12 localized pages and dynamic UI state tests passed

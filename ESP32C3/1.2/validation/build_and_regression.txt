@@ -1,0 +1,14 @@
+Build date: 2026-10-27 JST
+Board: esp32:esp32:XIAO_ESP32C3:CDCOnBoot=cdc
+ESP32 Core: 3.3.12 / ESP-IDF 5.5.5
+Toolchain: esp-rv32 2601 (GCC 14.2.0)
+Build command: arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3:CDCOnBoot=cdc APRS_iGate_C3_Rev0_1
+Host command: sh tests/run_host.sh
+ASan/UBSan: PASS (ASAN_OPTIONS=detect_leaks=0; host blocks LeakSanitizer thread inspection)
+
+Byte-identical to FIX3 and FIX4:
+aprsis.h SHA256 c5d4d91f21c4517fda458346c8087380f3d557de155296bbcc8c63749a0d1146
+ax25.h SHA256 94bedda577a5b8e08c1b6a9d836b9948d2258d53b47bc1f437c66624474b2feb
+settings.h SHA256 88f615fa22358c0f1139c21038e0d9a96c58b81876d79e9da50ffcb2ea04633b
+dra818v.h SHA256 154460dc3e3942d4c69d17af2cb924cdbbccf4966dffec86209e0c64a21d796f
+lcd1602_pcf8574.h SHA256 4c319f56f25e837e2432d27e1053fe2a47f5dc033576c0a1d48c168cb708cc28

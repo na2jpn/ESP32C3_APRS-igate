@@ -1,0 +1,462 @@
+--- fix4/config.h
++++ out/config.h
+@@ -8,7 +8,7 @@
+ // -----------------------------------------------------------------------------
+ 
+ #define FW_NAME       "APRS-iGate-C3"
+-#define FW_VERSION    "0.1 FIX4"
++#define FW_VERSION    "0.1 FIX5"
+ 
+ // FIX3: ADC continuous DMA re-enabled for live AFSK receive.
+ // To isolate an ADC-related crash, temporarily set this to 1.
+--- fix4/afsk1200.h
++++ out/afsk1200.h
+@@ -114,6 +114,7 @@
+     }
+   }
+ 
++  float meanSquare() const { return _rms; }
+   float rms() const { return sqrtf(_rms); } // true normalized RMS (previously mean square)
+   float markLevel() const { return sqrtf(_mi * _mi + _mq * _mq); }
+   float spaceLevel() const { return sqrtf(_si * _si + _sq * _sq); }
+--- fix4/audio_adc.h
++++ out/audio_adc.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <Arduino.h>
++#include "freertos/FreeRTOS.h"
++#include "freertos/task.h"
+ #include "config.h"
+ #include "afsk1200.h"
+ #include "esp_adc/adc_continuous.h"
+@@ -15,6 +17,16 @@
+   float mark1200 = 0;
+   float space2200 = 0;
+   uint32_t sampleCount = 0;
++  uint32_t crcBad = 0;
++  uint32_t framesGood = 0;
++  uint32_t frameErrors = 0;
++  uint32_t readErrors = 0;
++  uint32_t readTimeouts = 0;
++  uint32_t poolOverflows = 0;
++  uint32_t maxBlockUs = 0;
++  uint32_t processingUs = 0;
++  uint32_t stackFreeBytes = 0;
++  uint32_t updatedAtMs = 0;
+ };
+ 
+ class AudioAdcCapture {
+@@ -33,15 +45,16 @@
+ #if !defined(CONFIG_IDF_TARGET_ESP32C3)
+     return false;
+ #else
++    if (_handle || _task) return false; // begin is setup-only, never race a live reader
+     adc_continuous_handle_cfg_t handleCfg = {};
+-    handleCfg.max_store_buf_size = 2048;
++    handleCfg.max_store_buf_size = 8192; // ~77 ms at 26400 x 4 bytes
+     handleCfg.conv_frame_size = 512;
+     esp_err_t err = adc_continuous_new_handle(&handleCfg, &_handle);
+     if (err != ESP_OK) {
+-      Serial.printf("[ADC] new_handle failed: %s\\n", esp_err_to_name(err));
+-      return false;
+-    }
+-    Serial.println("[ADC] new_handle OK");
++      DBG_PRINTF("[ADC] new_handle failed: %s\n", esp_err_to_name(err));
++      return false;
++    }
++    DBG_PRINTLN("[ADC] new_handle OK");
+ 
+     adc_digi_pattern_config_t pattern = {};
+ #if defined(ADC_ATTEN_DB_12)
+@@ -63,30 +76,39 @@
+     cfg.adc_pattern = &pattern;
+     err = adc_continuous_config(_handle, &cfg);
+     if (err != ESP_OK) {
+-      Serial.printf("[ADC] config failed: %s\\n", esp_err_to_name(err));
+-      adc_continuous_deinit(_handle);
+-      _handle = nullptr;
+-      return false;
+-    }
+-    Serial.println("[ADC] config OK");
++      DBG_PRINTF("[ADC] config failed: %s\n", esp_err_to_name(err));
++      adc_continuous_deinit(_handle);
++      _handle = nullptr;
++      return false;
++    }
++    DBG_PRINTLN("[ADC] config OK");
++    adc_continuous_evt_cbs_t callbacks = {};
++    callbacks.on_pool_ovf = poolOverflow;
++    err = adc_continuous_register_event_callbacks(_handle, &callbacks, this);
++    if (err != ESP_OK) {
++      DBG_PRINTF("[ADC] callbacks failed: %s\n", esp_err_to_name(err));
++      adc_continuous_deinit(_handle);
++      _handle = nullptr;
++      return false;
++    }
+     err = adc_continuous_start(_handle);
+     if (err != ESP_OK) {
+-      Serial.printf("[ADC] start failed: %s\\n", esp_err_to_name(err));
+-      adc_continuous_deinit(_handle);
+-      _handle = nullptr;
+-      return false;
+-    }
+-    Serial.println("[ADC] start OK");
+-
+-    BaseType_t ok = xTaskCreate(taskThunk, "afsk_adc", 4096, this, 3, &_task);
++      DBG_PRINTF("[ADC] start failed: %s\n", esp_err_to_name(err));
++      adc_continuous_deinit(_handle);
++      _handle = nullptr;
++      return false;
++    }
++    DBG_PRINTLN("[ADC] start OK");
++
++    BaseType_t ok = xTaskCreate(taskThunk, "afsk_adc", 6144, this, 1, &_task);
+     if (ok != pdPASS) {
+-      Serial.println("[ADC] task creation failed");
++      DBG_PRINTLN("[ADC] task creation failed");
+       adc_continuous_stop(_handle);
+       adc_continuous_deinit(_handle);
+       _handle = nullptr;
+       return false;
+     }
+-    Serial.println("[ADC] task created");
++    DBG_PRINTLN("[ADC] task created: priority=1 stack=6144 pool=8192, bounded work + 1 tick sleep");
+     return true;
+ #endif
+   }
+@@ -103,17 +125,48 @@
+   uint16_t _windowMin = 4095;
+   uint16_t _windowMax = 0;
+   float _windowPeak = 0;
+-  float _windowMark = 0;
+-  float _windowSpace = 0;
+   uint32_t _totalSamples = 0;
++  uint32_t _readErrors = 0;
++  uint32_t _readTimeouts = 0;
++  uint32_t _poolOverflows = 0;
++  portMUX_TYPE _overflowMux = portMUX_INITIALIZER_UNLOCKED;
++  uint32_t _maxBlockUs = 0;
++  uint32_t _processingUs = 0;
++
++  // ISR: counter only, protected by an ISR-safe critical section.
++  static bool IRAM_ATTR poolOverflow(adc_continuous_handle_t,
++                                    const adc_continuous_evt_data_t *, void *arg) {
++    auto *self = static_cast<AudioAdcCapture *>(arg);
++    portENTER_CRITICAL_ISR(&self->_overflowMux);
++    ++self->_poolOverflows;
++    portEXIT_CRITICAL_ISR(&self->_overflowMux);
++    return false;
++  }
++
++  uint32_t overflowCount() {
++    portENTER_CRITICAL(&_overflowMux);
++    const uint32_t count = _poolOverflows;
++    portEXIT_CRITICAL(&_overflowMux);
++    return count;
++  }
++
++  void publishHealth() {
++    const uint32_t overflow = overflowCount();
++    const uint32_t stack = uxTaskGetStackHighWaterMark(nullptr);
++    portENTER_CRITICAL(&_monitorMux);
++    _monitor.readErrors = _readErrors;
++    _monitor.readTimeouts = _readTimeouts;
++    _monitor.poolOverflows = overflow;
++    _monitor.stackFreeBytes = stack;
++    portEXIT_CRITICAL(&_monitorMux);
++  }
+ 
+   void observe(uint16_t raw) {
+     if (raw < _windowMin) _windowMin = raw;
+     if (raw > _windowMax) _windowMax = raw;
+-    const float r = _decoder.rms();
+-    if (r > _windowPeak) _windowPeak = r;
+-    _windowMark = _decoder.markLevel();
+-    _windowSpace = _decoder.spaceLevel();
++    // sqrt is monotonic: hold squared values, take roots only on publication.
++    const float energy = _decoder.meanSquare();
++    if (energy > _windowPeak) _windowPeak = energy;
+     ++_windowSamples;
+     ++_totalSamples;
+     if (_windowSamples >= AFSK_SAMPLE_RATE / 4) {
+@@ -121,14 +174,28 @@
+       _peakPos = (_peakPos + 1) % 20;
+       float peak = 0;
+       for (float v : _peakBins) if (v > peak) peak = v;
++      AfMonitorSnapshot next;
++      next.adcMin = _windowMin;
++      next.adcMax = _windowMax;
++      next.rms = sqrtf(energy);
++      next.peak5s = sqrtf(peak);
++      next.mark1200 = _decoder.markLevel();
++      next.space2200 = _decoder.spaceLevel();
++      next.sampleCount = _totalSamples;
++      next.crcBad = _decoder.crcBad();
++      next.framesGood = _decoder.framesGood();
++      next.frameErrors = _decoder.frameErrors();
++      next.readErrors = _readErrors;
++      next.readTimeouts = _readTimeouts;
++      next.poolOverflows = overflowCount();
++      next.maxBlockUs = _maxBlockUs;
++      next.processingUs = _processingUs;
++      // ESP-IDF's stack watermark is bytes (not vanilla FreeRTOS words).
++      next.stackFreeBytes = uxTaskGetStackHighWaterMark(nullptr);
++      next.updatedAtMs = millis();
++      // Only a fixed-size copy with interrupts disabled. All math is above.
+       portENTER_CRITICAL(&_monitorMux);
+-      _monitor.adcMin = _windowMin;
+-      _monitor.adcMax = _windowMax;
+-      _monitor.rms = r;
+-      _monitor.peak5s = peak;
+-      _monitor.mark1200 = _windowMark;
+-      _monitor.space2200 = _windowSpace;
+-      _monitor.sampleCount = _totalSamples;
++      _monitor = next;
+       portEXIT_CRITICAL(&_monitorMux);
+       _windowSamples = 0;
+       _windowMin = 4095;
+@@ -144,10 +211,18 @@
+   void taskLoop() {
+ #if defined(CONFIG_IDF_TARGET_ESP32C3)
+     alignas(4) uint8_t buffer[512];
++    unsigned blocks = 0;
++    uint32_t seenOverflows = 0;
+     while (true) {
+       uint32_t outLen = 0;
+       esp_err_t err = adc_continuous_read(_handle, buffer, sizeof(buffer), &outLen, 1000);
++      const uint32_t overflows = overflowCount();
++      if (overflows != seenOverflows) {
++        seenOverflows = overflows;
++        _decoder.resetAll();
++      }
+       if (err == ESP_OK) {
++        const uint32_t started = micros();
+         for (uint32_t i = 0; i + SOC_ADC_DIGI_RESULT_BYTES <= outLen; i += SOC_ADC_DIGI_RESULT_BYTES) {
+           const adc_digi_output_data_t *p = reinterpret_cast<const adc_digi_output_data_t *>(&buffer[i]);
+           if (p->type2.channel == ADC_CHANNEL_3 && p->type2.unit == 0) {
+@@ -156,9 +231,25 @@
+             observe(raw);
+           }
+         }
+-      } else if (err != ESP_ERR_TIMEOUT) {
+-        delay(1);
++        const uint32_t elapsed = micros() - started;
++        _processingUs += elapsed;
++        if (elapsed > _maxBlockUs) _maxBlockUs = elapsed;
++      } else if (err == ESP_ERR_TIMEOUT) {
++        ++_readTimeouts;
++        _decoder.resetAll();
++        publishHealth();
++      } else {
++        ++_readErrors;
++        // A discontinuity must never join two unrelated HDLC fragments.
++        _decoder.resetAll();
++        publishHealth();
+       }
++      // yield() alone does not let lower-priority tasks run. A real blocked
++      // interval also allows IDLE/WDT to run when a DMA backlog never empties.
++      if (err != ESP_OK || ++blocks >= 4) {
++        blocks = 0;
++        vTaskDelay(1);
++      }
+     }
+ #endif
+   }
+--- fix4/APRS_iGate_C3_Rev0_1.ino
++++ out/APRS_iGate_C3_Rev0_1.ino
+@@ -147,8 +147,9 @@
+     return;
+   }
+   DBG_PRINTLN("[BOOT] WiFi AP_STA mode");
+-  WiFi.mode(WIFI_AP_STA);
+-  DBG_PRINTLN("[BOOT] WiFi mode ready");
++  const bool modeOk = WiFi.mode(WIFI_AP_STA);
++  DBG_PRINTF("[BOOT] WiFi AP_STA mode result=%d\n", modeOk);
++  if (!modeOk) return;
+   const String ssid = makeSetupSsid();
+   DBG_PRINTLN("[BOOT] softAP start");
+   if (WiFi.softAP(ssid.c_str(), SETUP_AP_PASSWORD)) {
+@@ -156,16 +157,24 @@
+     setupApActive = true;
+     DBG_PRINTF("Setup AP: %s / %s / %s\n", ssid.c_str(), SETUP_AP_PASSWORD, WiFi.softAPIP().toString().c_str());
+     lcdWake();
++  } else {
++    DBG_PRINTLN("[BOOT] softAP failed");
+   }
+ }
+ 
+ static void beginStationWifi() {
+   if (config.wifiSsid.length() == 0) return;
+-  DBG_PRINTLN("[BOOT] Station WiFi mode begin");
+-  if (!setupApActive) WiFi.mode(WIFI_STA);
+-  else WiFi.mode(WIFI_AP_STA);
+-  WiFi.setHostname("aprs-igate");
+-  WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
++  const uint32_t started = millis();
++  DBG_PRINTF("[BOOT] Station WiFi mode begin heap=%u\n", ESP.getFreeHeap());
++  const bool modeOk = WiFi.mode(setupApActive ? WIFI_AP_STA : WIFI_STA);
++  DBG_PRINTF("[BOOT] Station WiFi mode result=%d elapsed=%lu ms\n", modeOk, (unsigned long)(millis() - started));
++  if (!modeOk) { wifiAttemptStart = millis(); lastWifiRetry = millis(); return; }
++  DBG_PRINTLN("[BOOT] WiFi hostname begin");
++  const bool hostOk = WiFi.setHostname("aprs-igate");
++  DBG_PRINTF("[BOOT] WiFi hostname result=%d\n", hostOk);
++  DBG_PRINTLN("[BOOT] WiFi.begin begin");
++  const wl_status_t result = WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
++  DBG_PRINTF("[BOOT] WiFi.begin result=%d elapsed=%lu ms heap=%u\n", (int)result, (unsigned long)(millis() - started), ESP.getFreeHeap());
+   wifiAttemptStart = millis();
+   lastWifiRetry = millis();
+ }
+@@ -227,7 +236,7 @@
+   page.reserve(7000);
+   page += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+   page += F("<title>APRS iGate</title><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 14px;color:#222}h1{font-size:1.5rem}fieldset{margin:14px 0;padding:14px;border:1px solid #ccc;border-radius:8px}label{display:block;margin:9px 0}input{width:100%;box-sizing:border-box;padding:8px;font-size:16px}button{padding:10px 14px;margin:5px 5px 5px 0}.badge{display:inline-block;padding:3px 8px;border-radius:999px;margin:2px}.ok{background:#d9f5df}.ng{background:#f7d9d9}.mono{font-family:monospace;word-break:break-all}.small{font-size:.9rem;color:#555}</style></head><body>");
+-  page += F("<h1>APRS iGate ESP32C3 Rev0.1 FIX4</h1>");
++  page += F("<h1>APRS iGate ESP32C3 Rev0.1 FIX5</h1>");
+   page += statusBadge(String("Wi-Fi ") + (wifiOk ? "OK" : "NG"), wifiOk);
+   page += statusBadge(String("DRA818V ") + (draReady ? "OK" : "NG"), draReady);
+   page += statusBadge(String("ADC ") + (adcReady ? "OK" : "NG"), adcReady);
+@@ -242,12 +251,12 @@
+   page += F(" &nbsp; <b>Gated:</b> "); page += gatedPacketCount;
+   page += F(" &nbsp; <b>Dup:</b> "); page += duplicateCount;
+   page += F(" &nbsp; <b>Blocked:</b> "); page += blockedCount;
+-  page += F(" &nbsp; <b>CRC bad:</b> "); page += afsk.crcBad();
++  page += F(" &nbsp; <b>CRC bad:</b> "); page += audio.monitor().crcBad;
+   page += F(" &nbsp; <b>AF RMS:</b> "); page += String(audio.monitor().rms, 5);
+   page += F("</p><fieldset><legend>AFSK receive monitor (auto-update 1 s)</legend>");
+   page += F("<div class='mono' id='afdiag'>Loading monitor...</div>");
+   page += F("<p class='small'>ADC Min/Max are raw codes in the last 250 ms window. Mark/Space are detector magnitudes, not calibrated dB. Peak holds the maximum RMS over approximately 5 s.</p></fieldset>");
+-  page += F("<script>async function refreshAF(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json();const f=x=>Number(x||0).toFixed(5);document.getElementById('afdiag').textContent='AF RMS: '+f(s.af_rms)+' | Peak 5s: '+f(s.af_peak5s)+' | ADC Min/Max: '+s.adc_min+'/'+s.adc_max+' | 1200Hz: '+f(s.mark1200)+' | 2200Hz: '+f(s.space2200)+' | CRC bad: '+s.crc_bad+' | Decoded: '+s.decoded+' | Samples: '+s.samples;}catch(e){document.getElementById('afdiag').textContent='Monitor unavailable: '+e.message;}}refreshAF();setInterval(refreshAF,1000);</script>");
++  page += F("<script>async function refreshAF(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json();const f=x=>Number(x||0).toFixed(5);document.getElementById('afdiag').textContent='AF RMS: '+f(s.af_rms)+' | Peak 5s: '+f(s.af_peak5s)+' | ADC Min/Max: '+s.adc_min+'/'+s.adc_max+' | 1200Hz: '+f(s.mark1200)+' | 2200Hz: '+f(s.space2200)+' | CRC bad: '+s.crc_bad+' | Decoded: '+s.decoded+' | Samples: '+s.samples+' | DMA overflow: '+s.adc_overflows+' | Read errors: '+s.adc_read_errors+' | Stack free: '+s.adc_stack_free_bytes+' B | Max block: '+s.adc_max_block_us+' us';}catch(e){document.getElementById('afdiag').textContent='Monitor unavailable: '+e.message;}}refreshAF();setInterval(refreshAF,1000);</script>");
+   page += F("<p class='mono'><b>Last RX:</b> "); page += htmlEscape(lastRxLine); page += F("</p>");
+ 
+   page += F("<form method='post' action='/save'><fieldset><legend>Wi-Fi / APRS-IS</legend>");
+@@ -280,8 +289,10 @@
+     j += ",\"aprs_verified\":"; j += String(aprs.verified() ? "true" : "false");
+     j += ",\"decoded\":"; j += String(rxPacketCount);
+     j += ",\"gated\":"; j += String(gatedPacketCount);
+-    j += ",\"crc_bad\":"; j += String(afsk.crcBad());
+     const AfMonitorSnapshot m = audio.monitor();
++    j += ",\"crc_bad\":"; j += String(m.crcBad);
++    j += ",\"frames_good\":"; j += String(m.framesGood);
++    j += ",\"adc_updated_ms\":"; j += String(m.updatedAtMs);
+     j += ",\"af_rms\":"; j += String(m.rms, 6);
+     j += ",\"af_peak5s\":"; j += String(m.peak5s, 6);
+     j += ",\"adc_min\":"; j += String(m.adcMin);
+@@ -289,6 +300,13 @@
+     j += ",\"mark1200\":"; j += String(m.mark1200, 6);
+     j += ",\"space2200\":"; j += String(m.space2200, 6);
+     j += ",\"samples\":"; j += String(m.sampleCount);
++    j += ",\"adc_read_errors\":"; j += String(m.readErrors);
++    j += ",\"adc_timeouts\":"; j += String(m.readTimeouts);
++    j += ",\"adc_overflows\":"; j += String(m.poolOverflows);
++    j += ",\"adc_max_block_us\":"; j += String(m.maxBlockUs);
++    j += ",\"adc_processing_us\":"; j += String(m.processingUs);
++    j += ",\"adc_stack_free_bytes\":"; j += String(m.stackFreeBytes);
++    j += ",\"frame_errors\":"; j += String(m.frameErrors);
+     j += "}";
+     web.send(200, "application/json", j);
+   });
+@@ -460,7 +478,7 @@
+     char b[17];
+     snprintf(b, sizeof(b), "RX:%lu IS:%lu", (unsigned long)(rxPacketCount % 10000), (unsigned long)(gatedPacketCount % 10000));
+     lcd.printLine(0, b);
+-    String l2 = String("AF:") + String(afsk.rms(), 4) + " C:" + String(afsk.crcBad() % 100);
++    String l2 = String("AF:") + String(audio.monitor().rms, 4) + " C:" + String(audio.monitor().crcBad % 100);
+     lcd.printLine(1, l2);
+   }
+ }
+@@ -500,7 +518,10 @@
+ void setup() {
+   DBG_BEGIN();
+   delay(100);
+-  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.1 FIX4");
++  DBG_PRINTLN("\nAPRS iGate ESP32C3 Rev0.1 FIX5");
++  DBG_PRINTF("[BOOT] IDF=%s tick_hz=%u setup_priority=%u heap=%u\n",
++    ESP.getSdkVersion(), (unsigned)configTICK_RATE_HZ,
++    (unsigned)uxTaskPriorityGet(nullptr), ESP.getFreeHeap());
+ 
+   pinMode(PIN_LED_WIFI, OUTPUT);
+   pinMode(PIN_LED_APRS, OUTPUT);
+@@ -508,10 +529,14 @@
+   digitalWrite(PIN_LED_WIFI, LOW);
+   digitalWrite(PIN_LED_APRS, LOW);
+ 
++  DBG_PRINTF("[BOOT] settings load heap=%u\n", ESP.getFreeHeap());
+   settingsStore.load(config);
+   SettingsStore::normalize(config);
+-
++  DBG_PRINTLN("[BOOT] settings ready");
++
++  DBG_PRINTLN("[BOOT] LCD begin");
+   lcdPresent = lcd.begin(PIN_I2C_SDA, PIN_I2C_SCL);
++  DBG_PRINTF("[BOOT] LCD result=%d\n", lcdPresent);
+   if (lcdPresent) {
+     lcd.setBacklight(true);
+     lcd.printLine(0, "APRS iGate 0.1");
+@@ -527,8 +552,25 @@
+   DBG_PRINTLN("[BOOT] frame queue create");
+   frameQueue = xQueueCreate(6, sizeof(FrameMsg));
+   if (!frameQueue) DBG_PRINTLN("[ERROR] frame queue allocation failed");
++  else DBG_PRINTLN("[BOOT] frame queue ready");
+   DBG_PRINTLN("[BOOT] AFSK decoder begin");
+   afsk.begin();
++  DBG_PRINTLN("[BOOT] AFSK decoder ready");
++  DBG_PRINTLN("[BOOT] Web routes begin");
++  setupWebRoutes();
++  DBG_PRINTLN("[BOOT] Web routes ready (not listening yet)");
++  lastInternetGood = millis();
++
++  if (SettingsStore::validForStation(config)) {
++    DBG_PRINTLN("[BOOT] Station WiFi begin");
++    beginStationWifi();
++  } else {
++    DBG_PRINTLN("[BOOT] Setup AP begin");
++    startSetupAp();
++  }
++  DBG_PRINTLN("[BOOT] Web server begin after WiFi init");
++  web.begin();
++  DBG_PRINTLN("[BOOT] Web server ready");
+ #if APRS_DIAGNOSTIC_SKIP_ADC
+   DBG_PRINTLN("[DIAG] ADC DMA intentionally disabled (RX decode unavailable)");
+   adcReady = false;
+@@ -537,22 +579,7 @@
+   adcReady = audio.begin();
+   DBG_PRINTF("[BOOT] ADC DMA result=%d\n", adcReady);
+ #endif
+-  DBG_PRINTLN("[BOOT] Web routes begin");
+-  setupWebRoutes();
+-  DBG_PRINTLN("[BOOT] Web routes ready (not listening yet)");
+-  lastInternetGood = millis();
+-
+-  if (SettingsStore::validForStation(config)) {
+-    DBG_PRINTLN("[BOOT] Station WiFi begin");
+-    beginStationWifi();
+-  } else {
+-    DBG_PRINTLN("[BOOT] Setup AP begin");
+-    startSetupAp();
+-  }
+-  DBG_PRINTLN("[BOOT] Web server begin after WiFi init");
+-  web.begin();
+-  DBG_PRINTLN("[BOOT] Web server ready");
+-  DBG_PRINTLN("[BOOT] setup() finished");
++  DBG_PRINTF("[BOOT] setup() finished heap=%u\n", ESP.getFreeHeap());
+ }
+ 
+ void loop() {
+@@ -582,5 +609,15 @@
+     ESP.restart();
+   }
+ 
++  static uint32_t lastHealth = 0;
++  if (millis() - lastHealth >= 10000UL) {
++    lastHealth = millis();
++    const AfMonitorSnapshot m = audio.monitor();
++    DBG_PRINTF("[HEALTH] heap=%u loop_stack=%u adc_stack=%lu samples=%lu overflow=%lu read_err=%lu timeout=%lu max_block_us=%lu processing_us=%lu\n",
++      ESP.getFreeHeap(), (unsigned)uxTaskGetStackHighWaterMark(nullptr),
++      (unsigned long)m.stackFreeBytes, (unsigned long)m.sampleCount,
++      (unsigned long)m.poolOverflows, (unsigned long)m.readErrors,
++      (unsigned long)m.readTimeouts, (unsigned long)m.maxBlockUs, (unsigned long)m.processingUs);
++  }
+   delay(2);
+ }

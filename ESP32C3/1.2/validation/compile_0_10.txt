@@ -1,0 +1,21 @@
+Downloading index: library_index.tar.bz2 Get "https://downloads.arduino.cc/libraries/library_index.tar.bz2": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: Error downloading index 'https://downloads.arduino.cc/libraries/library_index.tar.bz2': Get "https://downloads.arduino.cc/libraries/library_index.tar.bz2": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:dfu-discovery@0.1.2...
+builtin:dfu-discovery@0.1.2 Get "https://downloads.arduino.cc/discovery/dfu-discovery/dfu-discovery_v0.1.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:dfu-discovery@0.1.2 tool: Get "https://downloads.arduino.cc/discovery/dfu-discovery/dfu-discovery_v0.1.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:mdns-discovery@1.1.0...
+builtin:mdns-discovery@1.1.0 Get "https://downloads.arduino.cc/discovery/mdns-discovery/mdns-discovery_v1.1.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:mdns-discovery@1.1.0 tool: Get "https://downloads.arduino.cc/discovery/mdns-discovery/mdns-discovery_v1.1.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:serial-discovery@1.5.2...
+builtin:serial-discovery@1.5.2 Get "https://downloads.arduino.cc/discovery/serial-discovery/serial-discovery_v1.5.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:serial-discovery@1.5.2 tool: Get "https://downloads.arduino.cc/discovery/serial-discovery/serial-discovery_v1.5.2_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Downloading missing tool builtin:serial-monitor@0.15.0...
+builtin:serial-monitor@0.15.0 Get "https://downloads.arduino.cc/monitor/serial-monitor/serial-monitor_v0.15.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: downloading builtin:serial-monitor@0.15.0 tool: Get "https://downloads.arduino.cc/monitor/serial-monitor/serial-monitor_v0.15.0_Linux_64bit.tar.gz": dial tcp: lookup downloads.arduino.cc on 168.63.129.16:53: dial udp 168.63.129.16:53: connect: network is unreachable
+Error initializing instance: Error loading hardware platform: discovery builtin:serial-discovery not installed
+Error initializing instance: Error loading hardware platform: discovery builtin:mdns-discovery not installed
+Error initializing instance: Error loading hardware platform: discovery builtin:serial-discovery not installed
+Error initializing instance: Error loading hardware platform: discovery builtin:mdns-discovery not installed
+Error initializing instance: Loading index file: reading library_index.json: open /workspace/scratch/87c9f8083559/build_tools/arduino_data/library_index.json: no such file or directory
+Sketch uses 1222641 bytes (93%) of program storage space. Maximum is 1310720 bytes.
+Global variables use 65420 bytes (19%) of dynamic memory, leaving 262260 bytes for local variables. Maximum is 327680 bytes.
